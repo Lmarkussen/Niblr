@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/json"
+	"flag"
+	"fmt"
 	"image/color"
 	"log"
 	"math"
@@ -98,6 +100,14 @@ type ScoreFile struct {
 	Scores map[string][]ScoreEntry `json:"scores"`
 }
 
+type cliOptions struct {
+	Level      int
+	Difficulty int
+	Lives      int
+	Muted      bool
+	DebugStart bool
+}
+
 type Game struct {
 	snake       []point
 	dir         direction
@@ -133,6 +143,75 @@ func NewGame() *Game {
 	g.difficulty = clamp(settings.Difficulty, 0, len(difficulties)-1)
 	g.scores = LoadScores()
 	return g
+}
+
+func parseCLI(args []string) (cliOptions, error) {
+	options := cliOptions{Level: 1, Difficulty: -1, Lives: startLives}
+	flags := flag.NewFlagSet("niblr", flag.ContinueOnError)
+	flags.SetOutput(&bytes.Buffer{})
+	level := flags.Int("level", 0, "start directly on level 1-30")
+	difficulty := flags.String("difficulty", "", "normal, hard, or insane")
+	lives := flags.Int("lives", startLives, "starting lives")
+	mute := flags.Bool("mute", false, "start muted")
+	if err := flags.Parse(args); err != nil {
+		return options, err
+	}
+
+	supplied := map[string]bool{}
+	flags.Visit(func(flag *flag.Flag) {
+		supplied[flag.Name] = true
+	})
+
+	options.DebugStart = supplied["level"] || supplied["difficulty"] || supplied["lives"] || supplied["mute"]
+	if supplied["level"] {
+		if *level < 1 || *level > maxDesignedLevel {
+			return options, fmt.Errorf("--level must be between 1 and %d", maxDesignedLevel)
+		}
+		options.Level = *level
+	}
+	if supplied["lives"] && *lives < 1 {
+		return options, fmt.Errorf("--lives must be at least 1")
+	}
+	options.Lives = *lives
+	if *mute {
+		options.Muted = true
+	}
+	if *difficulty != "" {
+		index, ok := difficultyIndex(*difficulty)
+		if !ok {
+			return options, fmt.Errorf("--difficulty must be normal, hard, or insane")
+		}
+		options.Difficulty = index
+	}
+	return options, nil
+}
+
+func difficultyIndex(value string) (int, bool) {
+	value = strings.ToLower(strings.TrimSpace(value))
+	for i, difficulty := range difficulties {
+		if strings.ToLower(difficulty.name) == value {
+			return i, true
+		}
+	}
+	return 0, false
+}
+
+func (g *Game) applyCLI(options cliOptions) {
+	if options.Difficulty >= 0 {
+		g.difficulty = options.Difficulty
+	}
+	if options.Muted {
+		g.muted = true
+	}
+	if options.DebugStart {
+		g.score = 0
+		g.level = options.Level
+		g.completed = 0
+		g.lives = options.Lives
+		g.levelApples = 0
+		g.state = statePlaying
+		g.startLevel()
+	}
 }
 
 func (g *Game) restart() {
@@ -1224,7 +1303,13 @@ func main() {
 	ebiten.SetWindowSize(windowWidth, windowHeight)
 	ebiten.SetWindowTitle("Niblr")
 
-	if err := ebiten.RunGame(NewGame()); err != nil {
+	options, err := parseCLI(os.Args[1:])
+	if err != nil {
+		log.Fatal(err)
+	}
+	game := NewGame()
+	game.applyCLI(options)
+	if err := ebiten.RunGame(game); err != nil {
 		log.Fatal(err)
 	}
 }

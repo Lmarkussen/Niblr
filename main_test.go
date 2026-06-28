@@ -427,6 +427,68 @@ func TestReturnToMenuClearsRunButKeepsDifficultySelection(t *testing.T) {
 	}
 }
 
+func TestParseCLIDefaultsToMenuMode(t *testing.T) {
+	options, err := parseCLI(nil)
+	if err != nil {
+		t.Fatalf("parse cli: %v", err)
+	}
+	if options.DebugStart {
+		t.Fatal("expected no debug start without flags")
+	}
+	if options.Level != 1 || options.Lives != startLives || options.Difficulty != -1 {
+		t.Fatalf("unexpected defaults: %+v", options)
+	}
+}
+
+func TestParseCLIDebugOptions(t *testing.T) {
+	options, err := parseCLI([]string{"--level", "12", "--difficulty", "hard", "--lives", "7", "--mute"})
+	if err != nil {
+		t.Fatalf("parse cli: %v", err)
+	}
+	if !options.DebugStart {
+		t.Fatal("expected debug start")
+	}
+	if options.Level != 12 || options.Difficulty != 1 || options.Lives != 7 || !options.Muted {
+		t.Fatalf("unexpected options: %+v", options)
+	}
+}
+
+func TestParseCLIRejectsInvalidLevelBounds(t *testing.T) {
+	if _, err := parseCLI([]string{"--level", "0"}); err == nil {
+		t.Fatal("expected level 0 to fail")
+	}
+	if _, err := parseCLI([]string{"--level", strconv.Itoa(maxDesignedLevel + 1)}); err == nil {
+		t.Fatal("expected level above max to fail")
+	}
+}
+
+func TestParseCLIRejectsInvalidDifficulty(t *testing.T) {
+	if _, err := parseCLI([]string{"--difficulty", "nightmare"}); err == nil {
+		t.Fatal("expected invalid difficulty to fail")
+	}
+}
+
+func TestParseCLIRejectsInvalidLives(t *testing.T) {
+	if _, err := parseCLI([]string{"--lives", "0"}); err == nil {
+		t.Fatal("expected zero lives to fail")
+	}
+}
+
+func TestApplyCLIStartsAtRequestedLevel(t *testing.T) {
+	g := NewGame()
+	g.audio = nil
+	g.applyCLI(cliOptions{DebugStart: true, Level: 17, Difficulty: 2, Lives: 6, Muted: true})
+	if g.state != statePlaying {
+		t.Fatalf("expected playing state, got %v", g.state)
+	}
+	if g.level != 17 || g.difficulty != 2 || g.lives != 6 || !g.muted {
+		t.Fatalf("unexpected applied game state: level=%d difficulty=%d lives=%d muted=%v", g.level, g.difficulty, g.lives, g.muted)
+	}
+	if len(g.obstacles) == 0 || !g.hasApple {
+		t.Fatal("expected requested level to be initialized")
+	}
+}
+
 func TestHighScoreOrderingAndTrimming(t *testing.T) {
 	file := ScoreFile{Scores: map[string][]ScoreEntry{}}
 	for i := 0; i < 12; i++ {

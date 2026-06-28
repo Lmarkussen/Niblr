@@ -93,6 +93,23 @@ make test
 make build
 ```
 
+## Developer/testing options
+
+These command-line flags are intended for local testing and bypass the normal start menu only when supplied:
+
+```sh
+go run . --level 12 --difficulty hard --lives 6 --mute
+```
+
+| Flag | Description |
+| --- | --- |
+| `--level N` | Start directly on level `N`, from 1 to 30 |
+| `--difficulty normal\|hard\|insane` | Start with the selected difficulty |
+| `--lives N` | Start with `N` lives |
+| `--mute` | Start muted |
+
+Invalid level, difficulty, or lives values fail before the game window opens.
+
 ## Credits
 
 - Built with Go and Ebitengine.
