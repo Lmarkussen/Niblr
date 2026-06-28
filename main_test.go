@@ -28,6 +28,9 @@ func TestSpawnAppleAvoidsSnakeAndObstacles(t *testing.T) {
 		if g.hitsObstacle(g.apple) {
 			t.Fatalf("apple spawned inside obstacle: %+v", g.apple)
 		}
+		if !reachableFrom(g.snake[0], g.apple, g.obstacles, g.snake) {
+			t.Fatalf("apple spawned in unreachable cell: %+v", g.apple)
+		}
 	}
 }
 
@@ -66,6 +69,85 @@ func TestCollisionLogic(t *testing.T) {
 	}
 	if !g.hitsSnakeOnMove(point{x: 3, y: 5}, true) {
 		t.Fatal("moving into the current tail should collide when growing")
+	}
+}
+
+func TestLevelCompleteWaitsForSpaceBeforeAdvancing(t *testing.T) {
+	g := NewGame()
+	for i := 0; i < applesPerLevel; i++ {
+		next := point{x: g.snake[0].x + g.dir.x, y: g.snake[0].y + g.dir.y}
+		g.apple = next
+		g.hasApple = true
+		g.step()
+	}
+
+	if g.state != stateLevelComplete {
+		t.Fatalf("expected level complete state, got %v", g.state)
+	}
+	if g.completed != 1 {
+		t.Fatalf("expected completed level 1, got %d", g.completed)
+	}
+	if g.level != 1 {
+		t.Fatalf("expected level not to advance before Space, got %d", g.level)
+	}
+
+	g.continueAfterLevelComplete()
+	if g.state != statePlaying {
+		t.Fatalf("expected playing after continue, got %v", g.state)
+	}
+	if g.level != 2 {
+		t.Fatalf("expected level 2 after continue, got %d", g.level)
+	}
+	if g.levelApples != 0 {
+		t.Fatalf("expected apple progress reset, got %d", g.levelApples)
+	}
+}
+
+func TestObstacleCollisionLosesLife(t *testing.T) {
+	g := NewGame()
+	g.lives = 1
+	g.snake = []point{{x: 5, y: 5}, {x: 4, y: 5}, {x: 3, y: 5}}
+	g.dir = right
+	g.nextDir = right
+	g.obstacles = map[point]bool{{x: 6, y: 5}: true}
+
+	g.step()
+	if g.state != stateGameOver {
+		t.Fatal("expected obstacle collision to end game when no lives remain")
+	}
+}
+
+func TestSelfCollisionLosesLife(t *testing.T) {
+	g := NewGame()
+	g.lives = 1
+	g.snake = []point{
+		{x: 5, y: 5},
+		{x: 5, y: 6},
+		{x: 4, y: 6},
+		{x: 4, y: 5},
+		{x: 5, y: 5},
+	}
+	g.dir = down
+	g.nextDir = down
+	g.obstacles = map[point]bool{}
+
+	g.step()
+	if g.state != stateGameOver {
+		t.Fatal("expected self collision to end game when no lives remain")
+	}
+}
+
+func TestWallCollisionLosesLife(t *testing.T) {
+	g := NewGame()
+	g.lives = 1
+	g.snake = []point{{x: 0, y: 5}, {x: 1, y: 5}, {x: 2, y: 5}}
+	g.dir = left
+	g.nextDir = left
+	g.obstacles = map[point]bool{}
+
+	g.step()
+	if g.state != stateGameOver {
+		t.Fatal("expected wall collision to end game when no lives remain")
 	}
 }
 
@@ -123,5 +205,25 @@ func TestLoseLifeKeepsCurrentLevelUntilLivesDepleted(t *testing.T) {
 	g.loseLife()
 	if g.state != stateGameOver {
 		t.Fatal("expected game over when all lives are depleted")
+	}
+}
+
+func TestLevelLayoutsHaveValidAppleSpawnPositions(t *testing.T) {
+	for level := 1; level <= 10; level++ {
+		g := NewGame()
+		g.level = level
+		g.startLevel()
+
+		cells := g.reachableAppleCells()
+		if len(cells) < applesPerLevel*4 {
+			t.Fatalf("level %d has too few reachable apple cells: %d", level, len(cells))
+		}
+
+		for i := 0; i < 100; i++ {
+			g.spawnApple()
+			if !g.validApple(g.apple) {
+				t.Fatalf("level %d spawned invalid apple at %+v", level, g.apple)
+			}
+		}
 	}
 }
