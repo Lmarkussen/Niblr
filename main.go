@@ -109,6 +109,20 @@ func (g *Game) restart() {
 	g.startLevel()
 }
 
+func (g *Game) returnToMenu() {
+	g.score = 0
+	g.level = 1
+	g.completed = 0
+	g.lives = 0
+	g.levelApples = 0
+	g.moveTimer = 0
+	g.dirQueue = g.dirQueue[:0]
+	g.hasApple = false
+	g.obstacles = map[point]bool{}
+	g.snake = nil
+	g.state = stateMenu
+}
+
 func (g *Game) startLevel() {
 	g.levelApples = 0
 	g.moveTimer = 0
@@ -287,7 +301,10 @@ func (g *Game) handleInput() {
 		g.continueAfterLifeLost()
 	}
 	if g.state == stateGameOver && g.justPressed(ebiten.KeyR) {
-		g.restart()
+		g.returnToMenu()
+	}
+	if g.justPressed(ebiten.KeyQ) {
+		g.returnToMenu()
 	}
 }
 
@@ -323,6 +340,7 @@ func (g *Game) rememberKeys() {
 		ebiten.KeyP,
 		ebiten.KeyEscape,
 		ebiten.KeyM,
+		ebiten.KeyQ,
 		ebiten.KeyR,
 		ebiten.KeySpace,
 		ebiten.KeyEnter,
@@ -612,7 +630,7 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		drawCenteredText(screen, "Level "+strconv.Itoa(g.completed)+" Complete", "Press Space to continue")
 	}
 	if g.state == stateGameOver {
-		drawCenteredText(screen, "GAME OVER", "Score: "+strconv.Itoa(g.score)+"  Level: "+strconv.Itoa(g.level)+"  Press R to restart")
+		drawCenteredText(screen, "GAME OVER", "Score: "+strconv.Itoa(g.score)+"  Level: "+strconv.Itoa(g.level)+"  Press R for menu")
 	}
 }
 

@@ -287,3 +287,28 @@ func TestInputBufferRejectsReversalAndQueuesTurns(t *testing.T) {
 		t.Fatalf("expected second queued direction left, got %+v", g.dir)
 	}
 }
+
+func TestReturnToMenuClearsRunButKeepsDifficultySelection(t *testing.T) {
+	g := newStartedTestGame()
+	g.difficulty = 2
+	g.level = 4
+	g.score = 1200
+	g.lives = 1
+	g.levelApples = 9
+	g.dirQueue = []direction{up, left}
+
+	g.returnToMenu()
+
+	if g.state != stateMenu {
+		t.Fatalf("expected menu state, got %v", g.state)
+	}
+	if g.difficulty != 2 {
+		t.Fatalf("expected selected difficulty to remain 2, got %d", g.difficulty)
+	}
+	if g.score != 0 || g.level != 1 || g.levelApples != 0 {
+		t.Fatalf("expected run state reset, score=%d level=%d apples=%d", g.score, g.level, g.levelApples)
+	}
+	if len(g.dirQueue) != 0 {
+		t.Fatalf("expected input buffer cleared, got %d entries", len(g.dirQueue))
+	}
+}

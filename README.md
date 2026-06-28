@@ -40,8 +40,9 @@ make test
 - Arrow keys or WASD: move
 - P or Esc: pause/unpause
 - M: mute/unmute
+- Q: quit to main menu
 - Space: continue after losing a life or clearing a level
-- R: restart after game over
+- R: return to main menu after game over
 
 ## Gameplay
 
