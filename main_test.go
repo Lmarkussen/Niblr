@@ -2,12 +2,27 @@ package main
 
 import (
 	"math/rand"
+	"os"
+	"path/filepath"
+	"strconv"
 	"testing"
 )
+
+func withTempAppDir(t *testing.T) {
+	t.Helper()
+	old := appDirOverride
+	appDirOverride = t.TempDir()
+	t.Cleanup(func() {
+		appDirOverride = old
+	})
+}
 
 func newStartedTestGame() *Game {
 	g := NewGame()
 	g.audio = nil
+	g.difficulty = 0
+	g.muted = true
+	g.scores = ScoreFile{Scores: map[string][]ScoreEntry{}}
 	g.restart()
 	return g
 }
@@ -215,6 +230,7 @@ func TestLoseLifeKeepsCurrentLevelUntilLivesDepleted(t *testing.T) {
 		t.Fatalf("expected life lost state before final life is lost, got %v", g.state)
 	}
 
+	g.score = 0
 	g.loseLife()
 	if g.state != stateGameOver {
 		t.Fatal("expected game over when all lives are depleted")
@@ -311,4 +327,127 @@ func TestReturnToMenuClearsRunButKeepsDifficultySelection(t *testing.T) {
 	if len(g.dirQueue) != 0 {
 		t.Fatalf("expected input buffer cleared, got %d entries", len(g.dirQueue))
 	}
+}
+
+func TestHighScoreOrderingAndTrimming(t *testing.T) {
+	file := ScoreFile{Scores: map[string][]ScoreEntry{}}
+	for i := 0; i < 12; i++ {
+		file = addHighScore(file, ScoreEntry{
+			Name:       "P" + strconv.Itoa(i),
+			Score:      i * 100,
+			Level:      i,
+			Difficulty: "Normal",
+			When:       "2026-01-" + pad2(i+1),
+		})
+	}
+
+	scores := file.Scores["Normal"]
+	if len(scores) != 10 {
+		t.Fatalf("expected top 10 scores, got %d", len(scores))
+	}
+	if scores[0].Score != 1100 {
+		t.Fatalf("expected highest score first, got %d", scores[0].Score)
+	}
+	if scores[9].Score != 200 {
+		t.Fatalf("expected lowest retained score 200, got %d", scores[9].Score)
+	}
+}
+
+func TestHighScoresArePerDifficulty(t *testing.T) {
+	file := ScoreFile{Scores: map[string][]ScoreEntry{}}
+	file = addHighScore(file, ScoreEntry{Name: "AAA", Score: 100, Level: 1, Difficulty: "Normal", When: "2026-01-01T00:00:00Z"})
+	file = addHighScore(file, ScoreEntry{Name: "BBB", Score: 900, Level: 3, Difficulty: "Hard", When: "2026-01-01T00:00:00Z"})
+
+	if len(file.Scores["Normal"]) != 1 || file.Scores["Normal"][0].Name != "AAA" {
+		t.Fatal("expected normal score table to contain only normal score")
+	}
+	if len(file.Scores["Hard"]) != 1 || file.Scores["Hard"][0].Name != "BBB" {
+		t.Fatal("expected hard score table to contain only hard score")
+	}
+}
+
+func TestSettingsSaveLoad(t *testing.T) {
+	withTempAppDir(t)
+
+	if err := SaveSettings(Settings{Muted: true, Difficulty: 2}); err != nil {
+		t.Fatalf("save settings: %v", err)
+	}
+	settings := LoadSettings()
+	if !settings.Muted || settings.Difficulty != 2 {
+		t.Fatalf("unexpected settings: %+v", settings)
+	}
+}
+
+func TestScoresSaveLoad(t *testing.T) {
+	withTempAppDir(t)
+	file := ScoreFile{Scores: map[string][]ScoreEntry{
+		"Insane": {
+			{Name: "ACE", Score: 1200, Level: 4, Difficulty: "Insane", When: "2026-01-01T00:00:00Z"},
+		},
+	}}
+
+	if err := SaveScores(file); err != nil {
+		t.Fatalf("save scores: %v", err)
+	}
+	loaded := LoadScores()
+	if len(loaded.Scores["Insane"]) != 1 || loaded.Scores["Insane"][0].Name != "ACE" {
+		t.Fatalf("unexpected scores: %+v", loaded)
+	}
+}
+
+func TestMissingAndCorruptFilesReturnDefaults(t *testing.T) {
+	withTempAppDir(t)
+
+	if settings := LoadSettings(); settings.Muted || settings.Difficulty != 0 {
+		t.Fatalf("expected default settings for missing file, got %+v", settings)
+	}
+	if scores := LoadScores(); len(scores.Scores) != 0 {
+		t.Fatalf("expected empty scores for missing file, got %+v", scores)
+	}
+
+	if err := os.MkdirAll(appDirOverride, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(appDirOverride, "settings.json"), []byte("{bad"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(appDirOverride, "scores.json"), []byte("{bad"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if settings := LoadSettings(); settings.Muted || settings.Difficulty != 0 {
+		t.Fatalf("expected default settings for corrupt file, got %+v", settings)
+	}
+	if scores := LoadScores(); len(scores.Scores) != 0 {
+		t.Fatalf("expected empty scores for corrupt file, got %+v", scores)
+	}
+}
+
+func TestHighScoreQualificationAndSaveFlow(t *testing.T) {
+	withTempAppDir(t)
+	g := newStartedTestGame()
+	g.score = 500
+	g.level = 3
+	g.lives = 1
+
+	g.loseLife()
+	if g.state != stateNameEntry {
+		t.Fatalf("expected high score name entry, got %v", g.state)
+	}
+	g.nameInput = "ACE"
+	g.saveCurrentHighScore()
+	loaded := LoadScores()
+	if len(loaded.Scores["Normal"]) != 1 {
+		t.Fatalf("expected one saved normal high score, got %+v", loaded)
+	}
+	if loaded.Scores["Normal"][0].Name != "ACE" || loaded.Scores["Normal"][0].Level != 3 {
+		t.Fatalf("unexpected saved score: %+v", loaded.Scores["Normal"][0])
+	}
+}
+
+func pad2(value int) string {
+	if value < 10 {
+		return "0" + strconv.Itoa(value)
+	}
+	return strconv.Itoa(value)
 }

@@ -3,11 +3,16 @@ package main
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/json"
 	"image/color"
 	"log"
 	"math"
 	"math/rand"
+	"os"
+	"path/filepath"
+	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -56,6 +61,8 @@ const (
 	statePaused
 	stateLifeLost
 	stateLevelComplete
+	stateNameEntry
+	stateHighScores
 	stateGameOver
 )
 
@@ -68,6 +75,23 @@ var difficulties = []difficulty{
 	{name: "Normal", multiplier: 1},
 	{name: "Hard", multiplier: 2},
 	{name: "Insane", multiplier: 4},
+}
+
+type Settings struct {
+	Muted      bool `json:"muted"`
+	Difficulty int  `json:"difficulty"`
+}
+
+type ScoreEntry struct {
+	Name       string `json:"name"`
+	Score      int    `json:"score"`
+	Level      int    `json:"level"`
+	Difficulty string `json:"difficulty"`
+	When       string `json:"when"`
+}
+
+type ScoreFile struct {
+	Scores map[string][]ScoreEntry `json:"scores"`
 }
 
 type Game struct {
@@ -89,15 +113,22 @@ type Game struct {
 	moveTimer   int
 	difficulty  int
 	muted       bool
+	scores      ScoreFile
+	nameInput   string
 	keys        map[ebiten.Key]bool
 }
 
 func NewGame() *Game {
-	return &Game{
+	settings := LoadSettings()
+	g := &Game{
 		audio: NewAudio(),
 		rng:   rand.New(rand.NewSource(time.Now().UnixNano())),
 		keys:  map[ebiten.Key]bool{},
 	}
+	g.muted = settings.Muted
+	g.difficulty = clamp(settings.Difficulty, 0, len(difficulties)-1)
+	g.scores = LoadScores()
+	return g
 }
 
 func (g *Game) restart() {
@@ -120,7 +151,9 @@ func (g *Game) returnToMenu() {
 	g.hasApple = false
 	g.obstacles = map[point]bool{}
 	g.snake = nil
+	g.nameInput = ""
 	g.state = stateMenu
+	g.saveSettings()
 }
 
 func (g *Game) startLevel() {
@@ -229,6 +262,119 @@ func nearStart(p point) bool {
 	return math.Abs(float64(p.x-gridWidth/2)) < 5 && math.Abs(float64(p.y-gridHeight/2)) < 4
 }
 
+var appDirOverride string
+
+func appDir() string {
+	if appDirOverride != "" {
+		return appDirOverride
+	}
+	dir, err := os.UserConfigDir()
+	if err != nil || dir == "" {
+		return "."
+	}
+	return filepath.Join(dir, "niblr")
+}
+
+func settingsPath() string {
+	return filepath.Join(appDir(), "settings.json")
+}
+
+func scoresPath() string {
+	return filepath.Join(appDir(), "scores.json")
+}
+
+func LoadSettings() Settings {
+	data, err := os.ReadFile(settingsPath())
+	if err != nil {
+		return Settings{}
+	}
+	var settings Settings
+	if err := json.Unmarshal(data, &settings); err != nil {
+		return Settings{}
+	}
+	settings.Difficulty = clamp(settings.Difficulty, 0, len(difficulties)-1)
+	return settings
+}
+
+func SaveSettings(settings Settings) error {
+	settings.Difficulty = clamp(settings.Difficulty, 0, len(difficulties)-1)
+	return writeJSON(settingsPath(), settings)
+}
+
+func LoadScores() ScoreFile {
+	data, err := os.ReadFile(scoresPath())
+	if err != nil {
+		return ScoreFile{Scores: map[string][]ScoreEntry{}}
+	}
+	var file ScoreFile
+	if err := json.Unmarshal(data, &file); err != nil {
+		return ScoreFile{Scores: map[string][]ScoreEntry{}}
+	}
+	if file.Scores == nil {
+		file.Scores = map[string][]ScoreEntry{}
+	}
+	for difficulty := range file.Scores {
+		file.Scores[difficulty] = trimScores(file.Scores[difficulty])
+	}
+	return file
+}
+
+func SaveScores(file ScoreFile) error {
+	if file.Scores == nil {
+		file.Scores = map[string][]ScoreEntry{}
+	}
+	for difficulty := range file.Scores {
+		file.Scores[difficulty] = trimScores(file.Scores[difficulty])
+	}
+	return writeJSON(scoresPath(), file)
+}
+
+func writeJSON(path string, value any) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(value, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0o644)
+}
+
+func trimScores(scores []ScoreEntry) []ScoreEntry {
+	sort.SliceStable(scores, func(i, j int) bool {
+		if scores[i].Score != scores[j].Score {
+			return scores[i].Score > scores[j].Score
+		}
+		if scores[i].Level != scores[j].Level {
+			return scores[i].Level > scores[j].Level
+		}
+		return scores[i].When < scores[j].When
+	})
+	if len(scores) > 10 {
+		return append([]ScoreEntry{}, scores[:10]...)
+	}
+	return append([]ScoreEntry{}, scores...)
+}
+
+func qualifiesForHighScore(file ScoreFile, difficulty string, score int) bool {
+	if score <= 0 {
+		return false
+	}
+	scores := trimScores(file.Scores[difficulty])
+	if len(scores) < 10 {
+		return true
+	}
+	return score > scores[len(scores)-1].Score
+}
+
+func addHighScore(file ScoreFile, entry ScoreEntry) ScoreFile {
+	if file.Scores == nil {
+		file.Scores = map[string][]ScoreEntry{}
+	}
+	file.Scores[entry.Difficulty] = trimScores(append(file.Scores[entry.Difficulty], entry))
+	return file
+}
+
 func (g *Game) Update() error {
 	g.handleInput()
 	defer g.rememberKeys()
@@ -248,27 +394,48 @@ func (g *Game) Update() error {
 func (g *Game) handleInput() {
 	if g.justPressed(ebiten.KeyM) {
 		g.muted = !g.muted
+		g.saveSettings()
 	}
 
 	if g.state == stateMenu {
 		if g.justPressed(ebiten.KeyArrowUp) || g.justPressed(ebiten.KeyW) {
 			g.difficulty = (g.difficulty + len(difficulties) - 1) % len(difficulties)
+			g.saveSettings()
 		}
 		if g.justPressed(ebiten.KeyArrowDown) || g.justPressed(ebiten.KeyS) {
 			g.difficulty = (g.difficulty + 1) % len(difficulties)
+			g.saveSettings()
 		}
 		if g.justPressed(ebiten.KeyDigit1) {
 			g.difficulty = 0
+			g.saveSettings()
 		}
 		if g.justPressed(ebiten.KeyDigit2) {
 			g.difficulty = 1
+			g.saveSettings()
 		}
 		if g.justPressed(ebiten.KeyDigit3) {
 			g.difficulty = 2
+			g.saveSettings()
+		}
+		if g.justPressed(ebiten.KeyH) {
+			g.state = stateHighScores
 		}
 		if g.justPressed(ebiten.KeySpace) || g.justPressed(ebiten.KeyEnter) {
 			g.restart()
 		}
+		return
+	}
+
+	if g.state == stateHighScores {
+		if g.justPressed(ebiten.KeyEscape) || g.justPressed(ebiten.KeyQ) || g.justPressed(ebiten.KeyH) {
+			g.returnToMenu()
+		}
+		return
+	}
+
+	if g.state == stateNameEntry {
+		g.handleNameEntry()
 		return
 	}
 
@@ -308,6 +475,28 @@ func (g *Game) handleInput() {
 	}
 }
 
+func (g *Game) handleNameEntry() {
+	for _, r := range ebiten.AppendInputChars(nil) {
+		if len(g.nameInput) >= 12 {
+			continue
+		}
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+			g.nameInput += strings.ToUpper(string(r))
+		}
+	}
+	if g.justPressed(ebiten.KeyBackspace) && len(g.nameInput) > 0 {
+		g.nameInput = g.nameInput[:len(g.nameInput)-1]
+	}
+	if g.justPressed(ebiten.KeyEnter) {
+		g.saveCurrentHighScore()
+		g.state = stateHighScores
+	}
+	if g.justPressed(ebiten.KeyEscape) {
+		g.nameInput = ""
+		g.state = stateGameOver
+	}
+}
+
 func (g *Game) setDirection(dir direction) {
 	if g.state != statePlaying {
 		return
@@ -339,7 +528,9 @@ func (g *Game) rememberKeys() {
 		ebiten.KeyA,
 		ebiten.KeyP,
 		ebiten.KeyEscape,
+		ebiten.KeyBackspace,
 		ebiten.KeyM,
+		ebiten.KeyH,
 		ebiten.KeyQ,
 		ebiten.KeyR,
 		ebiten.KeySpace,
@@ -373,6 +564,10 @@ func (g *Game) currentDifficulty() difficulty {
 		return difficulties[0]
 	}
 	return difficulties[g.difficulty]
+}
+
+func (g *Game) saveSettings() {
+	_ = SaveSettings(Settings{Muted: g.muted, Difficulty: g.difficulty})
 }
 
 func (g *Game) step() {
@@ -424,12 +619,38 @@ func (g *Game) loseLife() {
 	g.lives--
 	g.levelApples = 0
 	if g.lives <= 0 {
-		g.state = stateGameOver
+		g.finishGame()
 		g.playGameOver()
 		return
 	}
 
 	g.state = stateLifeLost
+}
+
+func (g *Game) finishGame() {
+	if qualifiesForHighScore(g.scores, g.currentDifficulty().name, g.score) {
+		g.nameInput = ""
+		g.state = stateNameEntry
+		return
+	}
+	g.state = stateGameOver
+}
+
+func (g *Game) saveCurrentHighScore() {
+	name := strings.TrimSpace(g.nameInput)
+	if name == "" {
+		name = "PLAYER"
+	}
+	entry := ScoreEntry{
+		Name:       name,
+		Score:      g.score,
+		Level:      g.level,
+		Difficulty: g.currentDifficulty().name,
+		When:       time.Now().Format(time.RFC3339),
+	}
+	g.scores = addHighScore(g.scores, entry)
+	_ = SaveScores(g.scores)
+	g.nameInput = ""
 }
 
 func (g *Game) playApple() {
@@ -613,6 +834,10 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		g.drawMenu(screen)
 		return
 	}
+	if g.state == stateHighScores {
+		g.drawHighScores(screen)
+		return
+	}
 
 	g.drawBoard(screen)
 	g.drawObstacles(screen)
@@ -628,6 +853,9 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	}
 	if g.state == stateLevelComplete {
 		drawCenteredText(screen, "Level "+strconv.Itoa(g.completed)+" Complete", "Press Space to continue")
+	}
+	if g.state == stateNameEntry {
+		g.drawNameEntry(screen)
 	}
 	if g.state == stateGameOver {
 		drawCenteredText(screen, "GAME OVER", "Score: "+strconv.Itoa(g.score)+"  Level: "+strconv.Itoa(g.level)+"  Press R for menu")
@@ -701,6 +929,62 @@ func (g *Game) drawMenu(screen *ebiten.Image) {
 	}
 	ebitenutil.DebugPrintAt(screen, "Up/Down or 1-3 to select", windowWidth/2-78, 340)
 	ebitenutil.DebugPrintAt(screen, "Press Space to start", windowWidth/2-66, 365)
+	ebitenutil.DebugPrintAt(screen, "Press H for high scores", windowWidth/2-72, 390)
+}
+
+func (g *Game) drawHighScores(screen *ebiten.Image) {
+	ebitenutil.DrawRect(screen, 0, 0, windowWidth, windowHeight, color.RGBA{R: 0, G: 0, B: 48, A: 255})
+	ebitenutil.DrawRect(screen, 20, 20, windowWidth-40, windowHeight-40, color.RGBA{R: 0, G: 0, B: 96, A: 255})
+	ebitenutil.DrawRect(screen, 20, 20, windowWidth-40, 4, color.RGBA{R: 0, G: 255, B: 255, A: 255})
+	ebitenutil.DebugPrintAt(screen, "HIGH SCORES", windowWidth/2-36, 45)
+	y := 85
+	for _, difficulty := range difficulties {
+		ebitenutil.DebugPrintAt(screen, difficulty.name, 70, y)
+		scores := trimScores(g.scores.Scores[difficulty.name])
+		if len(scores) == 0 {
+			ebitenutil.DebugPrintAt(screen, "No scores yet", 190, y)
+			y += 30
+			continue
+		}
+		for i, score := range scores {
+			line := strconv.Itoa(i+1) + ". " + padRight(score.Name, 12) +
+				" " + strconv.Itoa(score.Score) +
+				" L" + strconv.Itoa(score.Level) +
+				" " + shortDate(score.When)
+			ebitenutil.DebugPrintAt(screen, line, 190, y)
+			y += 18
+		}
+		y += 18
+	}
+	ebitenutil.DebugPrintAt(screen, "Esc/Q/H: back", windowWidth/2-42, windowHeight-48)
+}
+
+func (g *Game) drawNameEntry(screen *ebiten.Image) {
+	ebitenutil.DrawRect(screen, 0, hudHeight, windowWidth, windowHeight-hudHeight, color.RGBA{R: 0, G: 0, B: 0, A: 215})
+	x := float64(windowWidth/2 - 190)
+	y := float64(windowHeight/2 - 85)
+	ebitenutil.DrawRect(screen, x, y, 380, 170, color.RGBA{R: 0, G: 0, B: 96, A: 255})
+	ebitenutil.DrawRect(screen, x, y, 380, 4, color.RGBA{R: 255, G: 255, B: 96, A: 255})
+	ebitenutil.DrawRect(screen, x, y+166, 380, 4, color.RGBA{R: 255, G: 255, B: 96, A: 255})
+	ebitenutil.DrawRect(screen, x, y, 4, 170, color.RGBA{R: 255, G: 255, B: 96, A: 255})
+	ebitenutil.DrawRect(screen, x+376, y, 4, 170, color.RGBA{R: 255, G: 255, B: 96, A: 255})
+	ebitenutil.DebugPrintAt(screen, "NEW HIGH SCORE", windowWidth/2-48, windowHeight/2-48)
+	ebitenutil.DebugPrintAt(screen, "Name: "+g.nameInput+"_", windowWidth/2-70, windowHeight/2-12)
+	ebitenutil.DebugPrintAt(screen, "Enter saves   Esc cancels", windowWidth/2-78, windowHeight/2+34)
+}
+
+func padRight(value string, width int) string {
+	if len(value) >= width {
+		return value[:width]
+	}
+	return value + strings.Repeat(" ", width-len(value))
+}
+
+func shortDate(value string) string {
+	if len(value) >= 10 {
+		return value[:10]
+	}
+	return value
 }
 
 func drawCell(screen *ebiten.Image, p point, c color.Color) {
