@@ -23,20 +23,21 @@ import (
 )
 
 const (
-	windowWidth     = 800
-	windowHeight    = 600
-	cellSize        = 20
-	hudHeight       = 40
-	gridWidth       = windowWidth / cellSize
-	gridHeight      = (windowHeight - hudHeight) / cellSize
-	applesPerLevel  = 15
-	startLives      = 4
-	startMoveFrames = 16
-	minMoveFrames   = 6
-	fastestFrames   = 2
-	appleSpeedStep  = 2
-	sampleRate      = 44100
-	maxInputBuffer  = 2
+	windowWidth      = 800
+	windowHeight     = 600
+	cellSize         = 20
+	hudHeight        = 40
+	gridWidth        = windowWidth / cellSize
+	gridHeight       = (windowHeight - hudHeight) / cellSize
+	applesPerLevel   = 15
+	startLives       = 4
+	startMoveFrames  = 16
+	minMoveFrames    = 6
+	fastestFrames    = 2
+	appleSpeedStep   = 2
+	sampleRate       = 44100
+	maxInputBuffer   = 2
+	maxDesignedLevel = 30
 )
 
 type point struct {
@@ -66,6 +67,7 @@ const (
 	stateNameEntry
 	stateHighScores
 	stateGameOver
+	stateVictory
 )
 
 type difficulty struct {
@@ -179,6 +181,59 @@ func (g *Game) resetSnake() {
 	g.moveTimer = 0
 }
 
+type obstacleOp struct {
+	kind   byte
+	x1, y1 int
+	x2, y2 int
+	w, h   int
+	gaps   []int
+}
+
+func hline(y, x1, x2 int, gaps ...int) obstacleOp {
+	return obstacleOp{kind: 'h', y1: y, x1: x1, x2: x2, gaps: gaps}
+}
+
+func vline(x, y1, y2 int, gaps ...int) obstacleOp {
+	return obstacleOp{kind: 'v', x1: x, y1: y1, y2: y2, gaps: gaps}
+}
+
+func block(x, y, w, h int) obstacleOp {
+	return obstacleOp{kind: 'b', x1: x, y1: y, w: w, h: h}
+}
+
+var levelLayouts = [][]obstacleOp{
+	{},
+	{block(8, 7, 3, 2), block(29, 18, 3, 2)},
+	{block(7, 6, 3, 2), block(30, 6, 3, 2), block(7, 20, 3, 2), block(30, 20, 3, 2)},
+	{vline(10, 4, 23, 10, 18), vline(29, 4, 23, 9, 17)},
+	{hline(7, 4, 35, 12, 13, 27, 28), hline(20, 4, 35, 11, 12, 26, 27)},
+	{hline(8, 5, 34, 18, 19, 20, 21), vline(12, 5, 22, 12, 13, 14, 15), vline(27, 5, 22, 12, 13, 14, 15)},
+	{vline(8, 4, 23, 7, 14, 21), vline(16, 4, 23, 6, 13, 20), vline(24, 4, 23, 8, 15, 22), vline(32, 4, 23, 5, 12, 19)},
+	{hline(5, 4, 35, 9, 10, 29, 30), hline(11, 4, 35, 5, 6, 20, 21, 34, 35), hline(17, 4, 35, 13, 14, 27, 28), hline(23, 4, 35, 8, 9, 22, 23)},
+	{vline(6, 4, 23, 9, 18), vline(33, 4, 23, 8, 17), hline(5, 6, 33, 15, 16, 25, 26), hline(22, 6, 33, 13, 14, 23, 24), block(15, 9, 2, 2), block(24, 16, 2, 2)},
+	{vline(5, 4, 23, 7, 14, 21), vline(12, 4, 23, 10, 18), vline(28, 4, 23, 9, 17), vline(35, 4, 23, 6, 13, 20), hline(6, 5, 35, 9, 10, 22, 23, 33, 34), hline(14, 5, 35, 6, 7, 18, 19, 30, 31), hline(22, 5, 35, 11, 12, 25, 26)},
+	{hline(4, 4, 35, 8, 9, 20, 21, 32, 33), hline(12, 4, 35, 6, 7, 17, 18, 29, 30), hline(21, 4, 35, 10, 11, 24, 25), vline(10, 4, 23, 6, 15, 22), vline(30, 4, 23, 9, 18)},
+	{vline(7, 3, 24, 5, 11, 17, 23), vline(14, 3, 24, 8, 15, 22), vline(26, 3, 24, 6, 13, 20), vline(33, 3, 24, 10, 16, 24), hline(9, 7, 33, 12, 13, 27, 28), hline(19, 7, 33, 9, 10, 22, 23)},
+	{hline(4, 3, 36, 11, 12, 25, 26), hline(10, 3, 36, 7, 8, 19, 20, 33, 34), hline(18, 3, 36, 14, 15, 27, 28), hline(24, 3, 36, 9, 10, 21, 22, 34, 35), block(5, 13, 3, 2), block(31, 13, 3, 2)},
+	{vline(5, 4, 23, 8, 16), vline(11, 4, 23, 6, 14, 22), vline(29, 4, 23, 7, 15, 23), vline(35, 4, 23, 10, 18), hline(6, 5, 35, 13, 14, 26, 27), hline(22, 5, 35, 12, 13, 25, 26), block(17, 9, 2, 2), block(22, 17, 2, 2)},
+	{hline(5, 4, 35, 8, 9, 18, 19, 30, 31), hline(9, 4, 35, 12, 13, 24, 25), hline(18, 4, 35, 9, 10, 21, 22, 33, 34), hline(23, 4, 35, 15, 16, 27, 28), vline(9, 5, 23, 11, 17), vline(31, 5, 23, 8, 14, 21), block(18, 13, 4, 2)},
+	{vline(4, 3, 24, 6, 12, 18), vline(10, 3, 24, 9, 16, 23), vline(16, 3, 24, 5, 13, 21), vline(24, 3, 24, 8, 15, 22), vline(30, 3, 24, 6, 14, 20), vline(36, 3, 24, 10, 17), hline(7, 4, 36, 11, 12, 27, 28), hline(20, 4, 36, 8, 9, 23, 24)},
+	{hline(4, 3, 36, 6, 7, 18, 19, 32, 33), hline(8, 3, 36, 12, 13, 25, 26), hline(14, 3, 36, 9, 10, 29, 30), hline(20, 3, 36, 15, 16, 24, 25), hline(24, 3, 36, 7, 8, 21, 22, 34, 35), vline(6, 4, 24, 10, 18), vline(34, 4, 24, 9, 17), block(14, 11, 2, 3), block(25, 15, 2, 3)},
+	{vline(6, 3, 24, 7, 13, 19), vline(12, 3, 24, 5, 11, 17, 23), vline(18, 3, 24, 9, 15, 21), vline(27, 3, 24, 6, 12, 18), vline(33, 3, 24, 8, 14, 20), hline(5, 6, 33, 16, 17, 28, 29), hline(12, 6, 33, 8, 9, 23, 24), hline(21, 6, 33, 13, 14, 30, 31), block(21, 8, 2, 2)},
+	{hline(3, 4, 35, 10, 11, 22, 23, 34, 35), hline(7, 4, 35, 6, 7, 17, 18, 28, 29), hline(12, 4, 35, 13, 14, 25, 26), hline(18, 4, 35, 9, 10, 20, 21, 32, 33), hline(24, 4, 35, 15, 16, 27, 28), vline(8, 3, 24, 11, 19), vline(20, 3, 24, 6, 22), vline(32, 3, 24, 10, 18), block(5, 14, 3, 2), block(29, 10, 3, 2)},
+	{vline(4, 3, 24, 5, 11, 17, 23), vline(9, 3, 24, 8, 14, 20), vline(15, 3, 24, 6, 12, 18), vline(25, 3, 24, 9, 15, 21), vline(31, 3, 24, 7, 13, 19), vline(36, 3, 24, 10, 16, 22), hline(6, 4, 36, 12, 13, 24, 25), hline(11, 4, 36, 8, 9, 30, 31), hline(17, 4, 36, 16, 17, 27, 28), hline(22, 4, 36, 10, 11, 21, 22), block(18, 8, 4, 2), block(18, 18, 4, 2)},
+	{hline(3, 3, 36, 8, 9, 20, 21, 33, 34), hline(6, 3, 36, 13, 14, 25, 26), hline(10, 3, 36, 6, 7, 18, 19, 30, 31), hline(16, 3, 36, 11, 12, 23, 24, 35, 36), hline(21, 3, 36, 15, 16, 27, 28), hline(25, 3, 36, 9, 10, 22, 23, 34, 35), vline(7, 3, 25, 12, 20), vline(14, 3, 25, 8, 16, 24), vline(26, 3, 25, 10, 18), vline(33, 3, 25, 5, 6, 14, 22)},
+	{vline(3, 3, 24, 6, 12, 18, 24), vline(8, 3, 24, 9, 15, 21), vline(13, 3, 24, 5, 11, 17, 23), vline(18, 3, 24, 8, 14, 20), vline(27, 3, 24, 7, 13, 19), vline(32, 3, 24, 10, 16, 22), vline(37, 3, 24, 6, 12, 18), hline(5, 3, 37, 14, 15, 28, 29), hline(9, 3, 37, 7, 8, 21, 22, 34, 35), hline(15, 3, 37, 12, 13, 25, 26), hline(21, 3, 37, 10, 11, 30, 31), block(20, 6, 3, 2), block(16, 19, 3, 2)},
+	{hline(3, 3, 36, 7, 8, 18, 19, 29, 30), hline(7, 3, 36, 11, 12, 23, 24, 34, 35), hline(11, 3, 36, 6, 7, 17, 18, 28, 29), hline(17, 3, 36, 10, 11, 22, 23, 33, 34), hline(22, 3, 36, 14, 15, 26, 27), hline(25, 3, 36, 8, 9, 20, 21, 32, 33), vline(5, 3, 25, 9, 17), vline(11, 3, 25, 6, 14, 22), vline(29, 3, 25, 8, 16, 24), vline(35, 3, 25, 11, 19), block(15, 13, 3, 2), block(23, 13, 3, 2), block(19, 8, 2, 2), block(19, 18, 2, 2)},
+	{vline(4, 2, 25, 5, 10, 15, 20, 25), vline(9, 2, 25, 7, 13, 19), vline(14, 2, 25, 4, 11, 18, 24), vline(26, 2, 25, 6, 12, 18), vline(31, 2, 25, 9, 15, 21), vline(36, 2, 25, 5, 11, 17, 23), hline(4, 4, 36, 12, 13, 24, 25), hline(8, 4, 36, 6, 7, 18, 19, 30, 31), hline(13, 4, 36, 10, 11, 29, 30), hline(19, 4, 36, 15, 16, 26, 27), hline(24, 4, 36, 8, 9, 21, 22, 34, 35), block(17, 6, 2, 3), block(22, 19, 2, 3)},
+	{hline(2, 3, 36, 9, 10, 21, 22, 34, 35), hline(5, 3, 36, 6, 7, 18, 19, 30, 31), hline(9, 3, 36, 13, 14, 24, 25), hline(13, 3, 36, 8, 9, 31, 32), hline(17, 3, 36, 11, 12, 22, 23, 34, 35), hline(22, 3, 36, 15, 16, 28, 29), hline(25, 3, 36, 7, 8, 20, 21, 32, 33), vline(6, 2, 25, 10, 18), vline(12, 2, 25, 7, 15, 23), vline(28, 2, 25, 9, 17), vline(34, 2, 25, 6, 14, 22), block(18, 10, 4, 2), block(18, 16, 4, 2), block(9, 12, 2, 2), block(31, 12, 2, 2)},
+	{vline(3, 2, 25, 6, 12, 18, 24), vline(7, 2, 25, 4, 10, 16, 22), vline(12, 2, 25, 8, 14, 20), vline(17, 2, 25, 5, 11, 23), vline(23, 2, 25, 7, 13, 19), vline(28, 2, 25, 4, 10, 16, 22), vline(33, 2, 25, 9, 15, 21), vline(37, 2, 25, 6, 12, 18, 24), hline(5, 3, 37, 15, 16, 27, 28), hline(10, 3, 37, 8, 9, 21, 22, 34, 35), hline(17, 3, 37, 12, 13, 25, 26), hline(23, 3, 37, 10, 11, 30, 31), block(19, 7, 3, 2), block(19, 20, 3, 2)},
+	{hline(2, 2, 37, 8, 9, 20, 21, 32, 33), hline(5, 2, 37, 13, 14, 25, 26), hline(8, 2, 37, 6, 7, 18, 19, 30, 31), hline(12, 2, 37, 10, 11, 22, 23, 34, 35), hline(16, 2, 37, 15, 16, 27, 28), hline(20, 2, 37, 7, 8, 19, 20, 31, 32), hline(24, 2, 37, 12, 13, 24, 25), vline(4, 2, 25, 9, 17, 25), vline(10, 2, 25, 6, 14, 22), vline(16, 2, 25, 11, 23), vline(24, 2, 25, 5, 17), vline(30, 2, 25, 8, 16, 24), vline(36, 2, 25, 12, 20), block(18, 9, 2, 2), block(22, 9, 2, 2), block(18, 17, 2, 2), block(22, 17, 2, 2)},
+	{vline(2, 2, 25, 5, 11, 17, 23), vline(6, 2, 25, 8, 14, 20), vline(10, 2, 25, 4, 10, 16, 22), vline(15, 2, 25, 7, 13, 19, 25), vline(25, 2, 25, 6, 12, 18, 24), vline(30, 2, 25, 9, 15, 21), vline(34, 2, 25, 5, 11, 17, 23), vline(38, 2, 25, 8, 14, 20), hline(4, 2, 38, 12, 13, 24, 25, 36, 37), hline(7, 2, 38, 6, 7, 18, 19, 30, 31), hline(11, 2, 38, 15, 16, 27, 28), hline(16, 2, 38, 9, 10, 21, 22, 34, 35), hline(21, 2, 38, 13, 14, 25, 26), hline(25, 2, 38, 8, 9, 20, 21, 32, 33), block(18, 6, 4, 2), block(18, 20, 4, 2), block(8, 13, 2, 2), block(31, 13, 2, 2)},
+	{hline(2, 2, 37, 7, 8, 18, 19, 30, 31), hline(5, 2, 37, 11, 12, 23, 24, 35, 36), hline(8, 2, 37, 5, 6, 16, 17, 28, 29), hline(11, 2, 37, 13, 14, 25, 26), hline(15, 2, 37, 9, 10, 21, 22, 33, 34), hline(19, 2, 37, 15, 16, 27, 28), hline(23, 2, 37, 6, 7, 18, 19, 30, 31), hline(25, 2, 37, 12, 13, 24, 25, 36, 37), vline(3, 2, 25, 8, 16, 24), vline(8, 2, 25, 5, 13, 21), vline(13, 2, 25, 10, 18), vline(27, 2, 25, 7, 15, 23), vline(32, 2, 25, 4, 12, 20), vline(37, 2, 25, 9, 17, 25), block(18, 6, 2, 4), block(22, 18, 2, 4), block(19, 13, 4, 2)},
+	{vline(2, 2, 25, 6, 12, 18, 24), vline(5, 2, 25, 4, 10, 16, 22), vline(9, 2, 25, 8, 14, 20), vline(13, 2, 25, 5, 11, 17, 23), vline(17, 2, 25, 7, 25), vline(23, 2, 25, 6, 24), vline(27, 2, 25, 9, 15, 21), vline(31, 2, 25, 4, 10, 16, 22), vline(35, 2, 25, 8, 14, 20), vline(38, 2, 25, 6, 12, 18, 24), hline(3, 2, 38, 13, 14, 25, 26, 36, 37), hline(6, 2, 38, 7, 8, 19, 20, 31, 32), hline(10, 2, 38, 12, 13, 24, 25), hline(14, 2, 38, 5, 6, 34, 35), hline(18, 2, 38, 16, 17, 28, 29), hline(22, 2, 38, 9, 10, 21, 22, 33, 34), hline(25, 2, 38, 14, 15, 26, 27), block(18, 8, 4, 2), block(18, 18, 4, 2), block(7, 12, 2, 3), block(32, 12, 2, 3)},
+}
+
 func buildObstacles(level int) map[point]bool {
 	obstacles := map[point]bool{}
 
@@ -187,81 +242,109 @@ func buildObstacles(level int) map[point]bool {
 			obstacles[p] = true
 		}
 	}
-	hline := func(y, x1, x2 int, gaps ...int) {
-		for x := x1; x <= x2; x++ {
-			if contains(gaps, x) {
-				continue
+	layout := levelLayouts[clamp(level, 1, len(levelLayouts))-1]
+	for _, op := range layout {
+		switch op.kind {
+		case 'h':
+			for x := op.x1; x <= op.x2; x++ {
+				if !contains(op.gaps, x) {
+					add(point{x: x, y: op.y1})
+				}
 			}
-			add(point{x: x, y: y})
+		case 'v':
+			for y := op.y1; y <= op.y2; y++ {
+				if !contains(op.gaps, y) {
+					add(point{x: op.x1, y: y})
+				}
+			}
+		case 'b':
+			for y := op.y1; y < op.y1+op.h; y++ {
+				for x := op.x1; x < op.x1+op.w; x++ {
+					add(point{x: x, y: y})
+				}
+			}
 		}
 	}
-	vline := func(x, y1, y2 int, gaps ...int) {
-		for y := y1; y <= y2; y++ {
-			if contains(gaps, y) {
-				continue
-			}
-			add(point{x: x, y: y})
-		}
-	}
-	block := func(x, y, w, h int) {
-		for yy := y; yy < y+h; yy++ {
-			for xx := x; xx < x+w; xx++ {
-				add(point{x: xx, y: yy})
-			}
-		}
-	}
-
-	switch clamp(level, 1, 10) {
-	case 1:
-	case 2:
-		block(8, 7, 3, 2)
-		block(29, 18, 3, 2)
-	case 3:
-		block(7, 6, 3, 2)
-		block(30, 6, 3, 2)
-		block(7, 20, 3, 2)
-		block(30, 20, 3, 2)
-	case 4:
-		vline(10, 4, 23, 10, 18)
-		vline(29, 4, 23, 9, 17)
-	case 5:
-		hline(7, 4, 35, 12, 13, 27, 28)
-		hline(20, 4, 35, 11, 12, 26, 27)
-	case 6:
-		hline(8, 5, 34, 18, 19, 20, 21)
-		vline(12, 5, 22, 12, 13, 14, 15)
-		vline(27, 5, 22, 12, 13, 14, 15)
-	case 7:
-		vline(8, 4, 23, 7, 14, 21)
-		vline(16, 4, 23, 6, 13, 20)
-		vline(24, 4, 23, 8, 15, 22)
-		vline(32, 4, 23, 5, 12, 19)
-	case 8:
-		hline(5, 4, 35, 9, 10, 29, 30)
-		hline(11, 4, 35, 5, 6, 20, 21, 34, 35)
-		hline(17, 4, 35, 13, 14, 27, 28)
-		hline(23, 4, 35, 8, 9, 22, 23)
-	case 9:
-		vline(6, 4, 23, 9, 18)
-		vline(33, 4, 23, 8, 17)
-		hline(5, 6, 33, 15, 16, 25, 26)
-		hline(22, 6, 33, 13, 14, 23, 24)
-		block(15, 9, 2, 2)
-		block(24, 16, 2, 2)
-	case 10:
-		vline(5, 4, 23, 7, 14, 21)
-		vline(12, 4, 23, 10, 18)
-		vline(28, 4, 23, 9, 17)
-		vline(35, 4, 23, 6, 13, 20)
-		hline(6, 5, 35, 9, 10, 22, 23, 33, 34)
-		hline(14, 5, 35, 6, 7, 18, 19, 30, 31)
-		hline(22, 5, 35, 11, 12, 25, 26)
-	}
-	return obstacles
+	return connectOpenAreas(obstacles)
 }
 
 func nearStart(p point) bool {
 	return math.Abs(float64(p.x-gridWidth/2)) < 5 && math.Abs(float64(p.y-gridHeight/2)) < 4
+}
+
+func connectOpenAreas(obstacles map[point]bool) map[point]bool {
+	obstacles = copyObstacles(obstacles)
+	for attempts := 0; attempts < gridWidth*gridHeight; attempts++ {
+		reachable := reachableOpenFromStart(obstacles)
+		if len(reachable)+len(obstacles) >= gridWidth*gridHeight {
+			return obstacles
+		}
+
+		removed := false
+		for y := 0; y < gridHeight && !removed; y++ {
+			for x := 0; x < gridWidth && !removed; x++ {
+				p := point{x: x, y: y}
+				if !obstacles[p] {
+					continue
+				}
+				if bridgesReachableAndUnreachable(p, obstacles, reachable) {
+					delete(obstacles, p)
+					removed = true
+				}
+			}
+		}
+		if !removed {
+			return obstacles
+		}
+	}
+	return obstacles
+}
+
+func copyObstacles(obstacles map[point]bool) map[point]bool {
+	copied := make(map[point]bool, len(obstacles))
+	for p := range obstacles {
+		copied[p] = true
+	}
+	return copied
+}
+
+func reachableOpenFromStart(obstacles map[point]bool) map[point]bool {
+	start := point{x: gridWidth / 2, y: gridHeight / 2}
+	if obstacles[start] {
+		return map[point]bool{}
+	}
+	reachable := map[point]bool{start: true}
+	queue := []point{start}
+	for len(queue) > 0 {
+		p := queue[0]
+		queue = queue[1:]
+		for _, dir := range []direction{up, right, down, left} {
+			next := point{x: p.x + dir.x, y: p.y + dir.y}
+			if reachable[next] || !insideGrid(next) || obstacles[next] {
+				continue
+			}
+			reachable[next] = true
+			queue = append(queue, next)
+		}
+	}
+	return reachable
+}
+
+func bridgesReachableAndUnreachable(p point, obstacles map[point]bool, reachable map[point]bool) bool {
+	hasReachable := false
+	hasUnreachable := false
+	for _, dir := range []direction{up, right, down, left} {
+		next := point{x: p.x + dir.x, y: p.y + dir.y}
+		if !insideGrid(next) || obstacles[next] {
+			continue
+		}
+		if reachable[next] {
+			hasReachable = true
+		} else {
+			hasUnreachable = true
+		}
+	}
+	return hasReachable && hasUnreachable
 }
 
 var appDirOverride string
@@ -472,6 +555,12 @@ func (g *Game) handleInput() {
 	if g.state == stateGameOver && g.justPressed(ebiten.KeyR) {
 		g.returnToMenu()
 	}
+	if g.state == stateVictory && g.justPressed(ebiten.KeyR) {
+		g.restart()
+	}
+	if g.state == stateVictory && g.justPressed(ebiten.KeyEscape) {
+		g.returnToMenu()
+	}
 	if g.justPressed(ebiten.KeyQ) {
 		g.returnToMenu()
 	}
@@ -546,7 +635,7 @@ func (g *Game) rememberKeys() {
 }
 
 func (g *Game) moveFrames() int {
-	frames := startMoveFrames - (g.level-1)/2 - g.levelApples*appleSpeedStep
+	frames := startMoveFrames - (g.level-1)/5 - g.levelApples*appleSpeedStep
 	if frames < minMoveFrames {
 		frames = minMoveFrames
 	}
@@ -604,12 +693,30 @@ func (g *Game) step() {
 
 func (g *Game) completeLevel() {
 	g.completed = g.level
+	if g.level >= maxDesignedLevel {
+		g.finishVictory()
+		g.playLevelComplete()
+		return
+	}
 	g.state = stateLevelComplete
 	g.playLevelComplete()
 }
 
+func (g *Game) finishVictory() {
+	if qualifiesForHighScore(g.scores, g.currentDifficulty().name, g.score) {
+		g.nameInput = ""
+		g.state = stateNameEntry
+		return
+	}
+	g.state = stateVictory
+}
+
 func (g *Game) continueAfterLevelComplete() {
 	if g.state != stateLevelComplete {
+		return
+	}
+	if g.completed >= maxDesignedLevel {
+		g.finishVictory()
 		return
 	}
 	g.level = g.completed + 1
@@ -862,6 +969,9 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	if g.state == stateGameOver {
 		drawCenteredText(screen, "GAME OVER", "Score: "+strconv.Itoa(g.score)+"  Level: "+strconv.Itoa(g.level)+"  Press R for menu")
 	}
+	if g.state == stateVictory {
+		g.drawVictory(screen)
+	}
 }
 
 func (g *Game) drawBoard(screen *ebiten.Image) {
@@ -974,6 +1084,22 @@ func (g *Game) drawNameEntry(screen *ebiten.Image) {
 	ebitenutil.DebugPrintAt(screen, "NEW HIGH SCORE", windowWidth/2-48, windowHeight/2-48)
 	ebitenutil.DebugPrintAt(screen, "Name: "+g.nameInput+"_", windowWidth/2-70, windowHeight/2-12)
 	ebitenutil.DebugPrintAt(screen, "Enter saves   Esc cancels", windowWidth/2-78, windowHeight/2+34)
+}
+
+func (g *Game) drawVictory(screen *ebiten.Image) {
+	ebitenutil.DrawRect(screen, 0, hudHeight, windowWidth, windowHeight-hudHeight, color.RGBA{R: 0, G: 0, B: 0, A: 215})
+	x := float64(windowWidth/2 - 210)
+	y := float64(windowHeight/2 - 105)
+	ebitenutil.DrawRect(screen, x, y, 420, 210, color.RGBA{R: 0, G: 0, B: 96, A: 255})
+	ebitenutil.DrawRect(screen, x, y, 420, 4, color.RGBA{R: 255, G: 255, B: 96, A: 255})
+	ebitenutil.DrawRect(screen, x, y+206, 420, 4, color.RGBA{R: 255, G: 255, B: 96, A: 255})
+	ebitenutil.DrawRect(screen, x, y, 4, 210, color.RGBA{R: 255, G: 255, B: 96, A: 255})
+	ebitenutil.DrawRect(screen, x+416, y, 4, 210, color.RGBA{R: 255, G: 255, B: 96, A: 255})
+	ebitenutil.DebugPrintAt(screen, "You Beat Niblr!", windowWidth/2-48, windowHeight/2-70)
+	ebitenutil.DebugPrintAt(screen, "Final Score: "+strconv.Itoa(g.score), windowWidth/2-70, windowHeight/2-32)
+	ebitenutil.DebugPrintAt(screen, "Difficulty: "+g.currentDifficulty().name, windowWidth/2-70, windowHeight/2-8)
+	ebitenutil.DebugPrintAt(screen, "Lives Remaining: "+strconv.Itoa(g.lives), windowWidth/2-70, windowHeight/2+16)
+	ebitenutil.DebugPrintAt(screen, "R: restart   Esc: menu", windowWidth/2-70, windowHeight/2+58)
 }
 
 func padRight(value string, width int) string {

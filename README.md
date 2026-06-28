@@ -1,6 +1,6 @@
 # Niblr
 
-Niblr is a small retro Nibbles-inspired snake game written in Go with Ebitengine. It has deterministic levels, local high scores, difficulty modes, generated beep/boop sounds, and no downloaded assets.
+Niblr is a small retro Nibbles-inspired snake game written in Go with Ebitengine. It has 30 deterministic levels, local high scores, difficulty modes, generated beep/boop sounds, and no downloaded assets.
 
 ## Screenshots
 
@@ -55,6 +55,8 @@ The archive contains the `niblr` binary, `README.md`, `LICENSE`, and `CHANGELOG.
 | Game | `Q` | Quit to main menu |
 | Life lost / level clear | Space | Continue |
 | Game over | `R` | Return to main menu |
+| Victory | `R` | Restart |
+| Victory | Esc | Return to main menu |
 | High score entry | Letters/numbers | Enter name |
 | High score entry | Backspace | Delete character |
 | High score entry | Enter | Save score |
@@ -67,6 +69,10 @@ The archive contains the `niblr` binary, `README.md`, `LICENSE`, and `CHANGELOG.
 - Insane: 4x speed.
 
 Each apple increases speed during the current level. Speed resets when a new level starts.
+
+## Levels
+
+Niblr has 30 deterministic levels. Levels 1-3 introduce the game gently, levels 4-14 add lanes and partial mazes, levels 15-25 become dense and planning-heavy, and levels 26-30 are late-game Nibbles-style challenge layouts.
 
 ## Local Data
 

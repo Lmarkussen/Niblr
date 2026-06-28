@@ -125,6 +125,56 @@ func TestLevelCompleteWaitsForSpaceBeforeAdvancing(t *testing.T) {
 	}
 }
 
+func TestClearingLevel30EntersVictoryStateWithoutLevel31(t *testing.T) {
+	g := newStartedTestGame()
+	g.level = maxDesignedLevel
+	g.score = 100
+	g.scores = fullHighScores("Normal", 99999)
+	g.startLevel()
+	g.levelApples = applesPerLevel - 1
+	next := point{x: g.snake[0].x + g.dir.x, y: g.snake[0].y + g.dir.y}
+	g.apple = next
+	g.hasApple = true
+
+	g.step()
+
+	if g.state != stateVictory {
+		t.Fatalf("expected victory state after level %d clear, got %v", maxDesignedLevel, g.state)
+	}
+	if g.level != maxDesignedLevel {
+		t.Fatalf("expected level to remain %d, got %d", maxDesignedLevel, g.level)
+	}
+
+	g.continueAfterLevelComplete()
+	if g.level != maxDesignedLevel {
+		t.Fatalf("expected level 31 never to be created, got level %d", g.level)
+	}
+}
+
+func TestVictoryStillTriggersHighScoreEntry(t *testing.T) {
+	withTempAppDir(t)
+	g := newStartedTestGame()
+	g.level = maxDesignedLevel
+	g.score = 1000
+	g.startLevel()
+	g.levelApples = applesPerLevel - 1
+	next := point{x: g.snake[0].x + g.dir.x, y: g.snake[0].y + g.dir.y}
+	g.apple = next
+	g.hasApple = true
+
+	g.step()
+
+	if g.state != stateNameEntry {
+		t.Fatalf("expected high score entry after winning with qualifying score, got %v", g.state)
+	}
+	g.nameInput = "WIN"
+	g.saveCurrentHighScore()
+	loaded := LoadScores()
+	if len(loaded.Scores["Normal"]) != 1 || loaded.Scores["Normal"][0].Name != "WIN" {
+		t.Fatalf("expected winning score to save, got %+v", loaded)
+	}
+}
+
 func TestObstacleCollisionLosesLife(t *testing.T) {
 	g := newStartedTestGame()
 	g.lives = 1
@@ -238,7 +288,11 @@ func TestLoseLifeKeepsCurrentLevelUntilLivesDepleted(t *testing.T) {
 }
 
 func TestLevelLayoutsHaveValidAppleSpawnPositions(t *testing.T) {
-	for level := 1; level <= 10; level++ {
+	if len(levelLayouts) != maxDesignedLevel {
+		t.Fatalf("expected %d level layouts, got %d", maxDesignedLevel, len(levelLayouts))
+	}
+
+	for level := 1; level <= maxDesignedLevel; level++ {
 		g := newStartedTestGame()
 		g.level = level
 		g.startLevel()
@@ -247,6 +301,15 @@ func TestLevelLayoutsHaveValidAppleSpawnPositions(t *testing.T) {
 		if len(cells) < applesPerLevel*4 {
 			t.Fatalf("level %d has too few reachable apple cells: %d", level, len(cells))
 		}
+		if g.obstacles[g.snake[0]] || g.obstacles[g.snake[1]] || g.obstacles[g.snake[2]] {
+			t.Fatalf("level %d places obstacle on starting snake", level)
+		}
+		if openPercent(g.obstacles) < 55 {
+			t.Fatalf("level %d is too dense: %d%% open", level, openPercent(g.obstacles))
+		}
+		if unreachableOpenCells(g) != 0 {
+			t.Fatalf("level %d has %d unreachable open cells", level, unreachableOpenCells(g))
+		}
 
 		for i := 0; i < 100; i++ {
 			g.spawnApple()
@@ -254,6 +317,41 @@ func TestLevelLayoutsHaveValidAppleSpawnPositions(t *testing.T) {
 				t.Fatalf("level %d spawned invalid apple at %+v", level, g.apple)
 			}
 		}
+	}
+}
+
+func TestLevelDifficultyBands(t *testing.T) {
+	if len(buildObstacles(30)) == 0 {
+		t.Fatal("expected level 30 to exist with obstacles")
+	}
+	if len(buildObstacles(1)) != 0 {
+		t.Fatal("expected level 1 to have no obstacles")
+	}
+	if len(buildObstacles(2)) > 16 || len(buildObstacles(3)) > 30 {
+		t.Fatalf("expected levels 2-3 to stay simple, got %d and %d obstacles", len(buildObstacles(2)), len(buildObstacles(3)))
+	}
+	if len(buildObstacles(4)) <= len(buildObstacles(3)) {
+		t.Fatalf("expected real difficulty to start by level 4, got l3=%d l4=%d", len(buildObstacles(3)), len(buildObstacles(4)))
+	}
+
+	bands := []struct {
+		from int
+		to   int
+	}{
+		{1, 3},
+		{4, 8},
+		{9, 14},
+		{15, 20},
+		{21, 25},
+		{26, 30},
+	}
+	last := 0.0
+	for _, band := range bands {
+		avg := averageObstacleCount(band.from, band.to)
+		if avg <= last {
+			t.Fatalf("expected obstacle average to increase by band, band %d-%d avg %.1f after %.1f", band.from, band.to, avg, last)
+		}
+		last = avg
 	}
 }
 
@@ -443,6 +541,57 @@ func TestHighScoreQualificationAndSaveFlow(t *testing.T) {
 	if loaded.Scores["Normal"][0].Name != "ACE" || loaded.Scores["Normal"][0].Level != 3 {
 		t.Fatalf("unexpected saved score: %+v", loaded.Scores["Normal"][0])
 	}
+}
+
+func fullHighScores(difficulty string, score int) ScoreFile {
+	file := ScoreFile{Scores: map[string][]ScoreEntry{}}
+	for i := 0; i < 10; i++ {
+		file = addHighScore(file, ScoreEntry{
+			Name:       "CPU",
+			Score:      score + i,
+			Level:      maxDesignedLevel,
+			Difficulty: difficulty,
+			When:       "2026-01-" + pad2(i+1) + "T00:00:00Z",
+		})
+	}
+	return file
+}
+
+func openPercent(obstacles map[point]bool) int {
+	open := gridWidth*gridHeight - len(obstacles)
+	return open * 100 / (gridWidth * gridHeight)
+}
+
+func unreachableOpenCells(g *Game) int {
+	reachable := map[point]bool{}
+	for _, p := range g.reachableAppleCells() {
+		reachable[p] = true
+	}
+	if len(g.snake) > 0 {
+		reachable[g.snake[0]] = true
+	}
+
+	unreachable := 0
+	for y := 0; y < gridHeight; y++ {
+		for x := 0; x < gridWidth; x++ {
+			p := point{x: x, y: y}
+			if g.obstacles[p] || g.occupied(p) {
+				continue
+			}
+			if !reachable[p] {
+				unreachable++
+			}
+		}
+	}
+	return unreachable
+}
+
+func averageObstacleCount(from, to int) float64 {
+	total := 0
+	for level := from; level <= to; level++ {
+		total += len(buildObstacles(level))
+	}
+	return float64(total) / float64(to-from+1)
 }
 
 func pad2(value int) string {
