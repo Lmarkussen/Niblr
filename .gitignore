@@ -1,6 +1,7 @@
 # Go build outputs
 bin/
 dist/
+coverage.out
 *.exe
 *.out
 *.test
@@ -13,3 +14,5 @@ niblr
 
 # Runtime/local state
 *.log
+settings.json
+scores.json

@@ -1,56 +1,72 @@
 # Niblr
 
-Niblr is a retro Nibbles-inspired snake game written in Go with Ebitengine.
+Niblr is a small retro Nibbles-inspired snake game written in Go with Ebitengine. It has deterministic levels, local high scores, difficulty modes, generated beep/boop sounds, and no downloaded assets.
 
-## Build
+## Screenshots
+
+Screenshots will be added for the first tagged release.
+
+## Build And Run
+
+Run from source:
+
+```sh
+make run
+```
+
+Build a local binary:
 
 ```sh
 make build
 ./niblr
 ```
 
-## Run Without Building
-
-```sh
-go run .
-```
-
-or:
-
-```sh
-make run
-```
-
-## Test
-
-```sh
-go test ./...
-```
-
-or:
+Run tests:
 
 ```sh
 make test
 ```
 
+Create a Linux amd64 release archive:
+
+```sh
+make release-linux VERSION=v0.1.0
+```
+
+This writes:
+
+```text
+dist/niblr
+dist/niblr-linux-amd64.tar.gz
+```
+
+The archive contains the `niblr` binary, `README.md`, `LICENSE`, and `CHANGELOG.md`.
+
 ## Controls
 
-- Menu Up/Down or 1-3: select Normal, Hard, or Insane
-- Menu Space or Enter: start
-- Menu H: high scores
-- Arrow keys or WASD: move
-- P or Esc: pause/unpause
-- M: mute/unmute
-- Q: quit to main menu
-- Space: continue after losing a life or clearing a level
-- R: return to main menu after game over
-- High score entry: letters/numbers, Backspace, Enter to save, Esc to cancel
+| Context | Input | Action |
+| --- | --- | --- |
+| Menu | Up/Down or `1`-`3` | Select Normal, Hard, or Insane |
+| Menu | Space or Enter | Start game |
+| Menu | `H` | View high scores |
+| Game | Arrow keys or WASD | Move |
+| Game | `P` or Esc | Pause/unpause |
+| Game | `M` | Mute/unmute |
+| Game | `Q` | Quit to main menu |
+| Life lost / level clear | Space | Continue |
+| Game over | `R` | Return to main menu |
+| High score entry | Letters/numbers | Enter name |
+| High score entry | Backspace | Delete character |
+| High score entry | Enter | Save score |
+| High score entry | Esc | Cancel |
 
-## Gameplay
+## Difficulty
 
-Eat apples to increase your score, grow the snake, and raise the current speed. Each level is cleared after 15 apples, then waits for Space before the next level starts. Speed resets at the start of each level, and later levels add simple static obstacles.
+- Normal: baseline speed.
+- Hard: 2x speed.
+- Insane: 4x speed.
 
-You start with 4 lives. Avoid walls, obstacles, and your own body. Losing a life resets the current level apple count and waits for Space before respawning. Losing all lives ends the game.
+Each apple increases speed during the current level. Speed resets when a new level starts.
 
 ## Local Data
 
@@ -62,3 +78,20 @@ Niblr stores settings and high scores as local JSON files. On Linux this uses th
 ```
 
 If the operating system does not provide a config directory, Niblr falls back to the current working directory.
+
+## Development
+
+```sh
+make fmt
+make test
+make build
+```
+
+## Credits
+
+- Built with Go and Ebitengine.
+- Graphics and sounds are generated procedurally.
+
+## License
+
+Niblr is released under the MIT License. See `LICENSE`.

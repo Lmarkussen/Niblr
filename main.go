@@ -53,6 +53,8 @@ var (
 	left  = direction{x: -1, y: 0}
 )
 
+var version = "dev"
+
 type gameState int
 
 const (
@@ -918,6 +920,7 @@ func (g *Game) drawMenu(screen *ebiten.Image) {
 	ebitenutil.DrawRect(screen, 20, 20, windowWidth-40, 4, color.RGBA{R: 0, G: 255, B: 255, A: 255})
 	ebitenutil.DrawRect(screen, 20, windowHeight-24, windowWidth-40, 4, color.RGBA{R: 0, G: 255, B: 255, A: 255})
 	ebitenutil.DebugPrintAt(screen, "NIBLR", windowWidth/2-18, 170)
+	ebitenutil.DebugPrintAt(screen, "version "+version, windowWidth/2-36, 185)
 	ebitenutil.DebugPrintAt(screen, "Select difficulty", windowWidth/2-54, 205)
 	for i, difficulty := range difficulties {
 		prefix := "  "
