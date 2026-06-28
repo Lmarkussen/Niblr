@@ -62,17 +62,34 @@ The archive contains the `niblr` binary, `README.md`, `LICENSE`, and `CHANGELOG.
 | High score entry | Enter | Save score |
 | High score entry | Esc | Cancel |
 
+## Controller Support
+
+Niblr supports common standard-layout controllers such as Xbox, PlayStation, and Switch-style controllers. A controller is optional; keyboard input continues to work normally.
+
+| Controller input | Action |
+| --- | --- |
+| D-pad | Move / menu selection |
+| Left analog stick | Move / menu selection, with deadzone |
+| A / Cross / primary button | Confirm, start, continue |
+| B / Circle / secondary button | Back/cancel where applicable |
+| Start / Menu | Pause/unpause |
+| Select / Back | Mute/unmute |
+
 ## Difficulty
 
-- Normal: baseline speed.
-- Hard: 2x speed.
-- Insane: 4x speed.
+- Normal: fast baseline speed.
+- Hard: 2x Normal speed.
+- Insane: slightly faster than Hard and intentionally brutal.
 
 Each apple increases speed during the current level. Speed resets when a new level starts.
 
 ## Levels
 
 Niblr has 30 deterministic levels. Levels 1-3 introduce the game gently, levels 4-14 add lanes and partial mazes, levels 15-25 become dense and planning-heavy, and levels 26-30 are late-game Nibbles-style challenge layouts.
+
+## Music And Sound
+
+Niblr uses generated beep/boop sound effects and three generated looping chiptune-style tracks for menu, early-level, and late-level play. No external music is bundled. See `assets/README.md` for asset notes.
 
 ## Local Data
 

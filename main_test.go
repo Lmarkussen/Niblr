@@ -226,21 +226,21 @@ func TestWallCollisionLosesLife(t *testing.T) {
 func TestSpeedIncreasesWithApplesAndResetsOnLevelClear(t *testing.T) {
 	g := newStartedTestGame()
 
-	if g.speedMultiplier() != 1 {
-		t.Fatalf("expected starting speed 1x, got %dx", g.speedMultiplier())
+	if g.speedMultiplier() != 2 {
+		t.Fatalf("expected starting speed 2x, got %dx", g.speedMultiplier())
 	}
 
 	g.levelApples = 3
-	if g.speedMultiplier() != 7 {
+	if g.speedMultiplier() != 14 {
 		t.Fatalf("expected speed to increase with apples, got %dx", g.speedMultiplier())
 	}
-	if g.moveFrames() != startMoveFrames-3*appleSpeedStep {
+	if g.moveFrames() != ceilDiv(startMoveFrames-3*appleSpeedStep, difficulties[0].multiplier) {
 		t.Fatalf("expected move frames to drop by %d per apple, got %d", appleSpeedStep, g.moveFrames())
 	}
 
 	g.level = 2
 	g.startLevel()
-	if g.speedMultiplier() != 1 {
+	if g.speedMultiplier() != 2 {
 		t.Fatalf("expected speed to reset after level start, got %dx", g.speedMultiplier())
 	}
 }
@@ -399,6 +399,24 @@ func TestInputBufferRejectsReversalAndQueuesTurns(t *testing.T) {
 	g.step()
 	if g.dir != left {
 		t.Fatalf("expected second queued direction left, got %+v", g.dir)
+	}
+}
+
+func TestAnalogDirectionUsesDeadzoneAndDominantAxis(t *testing.T) {
+	if _, active := analogDirection(0.1, 0.1, stickDeadzone); active {
+		t.Fatal("expected stick drift inside deadzone to be ignored")
+	}
+	if dir, active := analogDirection(0.8, 0.2, stickDeadzone); !active || dir != right {
+		t.Fatalf("expected right direction, got %+v active=%v", dir, active)
+	}
+	if dir, active := analogDirection(-0.8, 0.2, stickDeadzone); !active || dir != left {
+		t.Fatalf("expected left direction, got %+v active=%v", dir, active)
+	}
+	if dir, active := analogDirection(0.2, -0.9, stickDeadzone); !active || dir != up {
+		t.Fatalf("expected up direction, got %+v active=%v", dir, active)
+	}
+	if dir, active := analogDirection(0.2, 0.9, stickDeadzone); !active || dir != down {
+		t.Fatalf("expected down direction, got %+v active=%v", dir, active)
 	}
 }
 

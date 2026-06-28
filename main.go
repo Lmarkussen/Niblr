@@ -22,6 +22,7 @@ import (
 	"github.com/hajimehoshi/ebiten/v2/audio"
 	"github.com/hajimehoshi/ebiten/v2/audio/wav"
 	"github.com/hajimehoshi/ebiten/v2/ebitenutil"
+	"github.com/hajimehoshi/ebiten/v2/inpututil"
 )
 
 const (
@@ -40,6 +41,7 @@ const (
 	sampleRate       = 44100
 	maxInputBuffer   = 2
 	maxDesignedLevel = 30
+	stickDeadzone    = 0.45
 )
 
 type point struct {
@@ -78,9 +80,9 @@ type difficulty struct {
 }
 
 var difficulties = []difficulty{
-	{name: "Normal", multiplier: 1},
-	{name: "Hard", multiplier: 2},
-	{name: "Insane", multiplier: 4},
+	{name: "Normal", multiplier: 2},
+	{name: "Hard", multiplier: 4},
+	{name: "Insane", multiplier: 6},
 }
 
 type Settings struct {
@@ -130,6 +132,10 @@ type Game struct {
 	scores      ScoreFile
 	nameInput   string
 	keys        map[ebiten.Key]bool
+	gamepadIDs  []ebiten.GamepadID
+	stickDir    direction
+	stickHeld   bool
+	controller  bool
 }
 
 func NewGame() *Game {
@@ -541,6 +547,7 @@ func addHighScore(file ScoreFile, entry ScoreEntry) ScoreFile {
 
 func (g *Game) Update() error {
 	g.handleInput()
+	g.updateMusic()
 	defer g.rememberKeys()
 
 	if g.state != statePlaying {
@@ -556,17 +563,24 @@ func (g *Game) Update() error {
 }
 
 func (g *Game) handleInput() {
-	if g.justPressed(ebiten.KeyM) {
+	gamepad := g.readGamepadInput()
+	mutePressed := g.justPressed(ebiten.KeyM) || gamepad.Mute
+	confirmPressed := g.justPressed(ebiten.KeySpace) || g.justPressed(ebiten.KeyEnter) || gamepad.Confirm
+	cancelPressed := g.justPressed(ebiten.KeyEscape) || gamepad.Cancel
+	pausePressed := g.justPressed(ebiten.KeyP) || g.justPressed(ebiten.KeyEscape) || gamepad.Pause
+	menuBackPressed := g.justPressed(ebiten.KeyQ) || gamepad.Cancel
+
+	if mutePressed {
 		g.muted = !g.muted
 		g.saveSettings()
 	}
 
 	if g.state == stateMenu {
-		if g.justPressed(ebiten.KeyArrowUp) || g.justPressed(ebiten.KeyW) {
+		if g.justPressed(ebiten.KeyArrowUp) || g.justPressed(ebiten.KeyW) || gamepad.Up {
 			g.difficulty = (g.difficulty + len(difficulties) - 1) % len(difficulties)
 			g.saveSettings()
 		}
-		if g.justPressed(ebiten.KeyArrowDown) || g.justPressed(ebiten.KeyS) {
+		if g.justPressed(ebiten.KeyArrowDown) || g.justPressed(ebiten.KeyS) || gamepad.Down {
 			g.difficulty = (g.difficulty + 1) % len(difficulties)
 			g.saveSettings()
 		}
@@ -585,21 +599,21 @@ func (g *Game) handleInput() {
 		if g.justPressed(ebiten.KeyH) {
 			g.state = stateHighScores
 		}
-		if g.justPressed(ebiten.KeySpace) || g.justPressed(ebiten.KeyEnter) {
+		if confirmPressed {
 			g.restart()
 		}
 		return
 	}
 
 	if g.state == stateHighScores {
-		if g.justPressed(ebiten.KeyEscape) || g.justPressed(ebiten.KeyQ) || g.justPressed(ebiten.KeyH) {
+		if cancelPressed || g.justPressed(ebiten.KeyQ) || g.justPressed(ebiten.KeyH) {
 			g.returnToMenu()
 		}
 		return
 	}
 
 	if g.state == stateNameEntry {
-		g.handleNameEntry()
+		g.handleNameEntry(confirmPressed, cancelPressed)
 		return
 	}
 
@@ -615,8 +629,20 @@ func (g *Game) handleInput() {
 	if g.justPressed(ebiten.KeyArrowLeft) || g.justPressed(ebiten.KeyA) {
 		g.setDirection(left)
 	}
+	if gamepad.Up {
+		g.setDirection(up)
+	}
+	if gamepad.Right {
+		g.setDirection(right)
+	}
+	if gamepad.Down {
+		g.setDirection(down)
+	}
+	if gamepad.Left {
+		g.setDirection(left)
+	}
 
-	if g.justPressed(ebiten.KeyP) || g.justPressed(ebiten.KeyEscape) {
+	if pausePressed {
 		if g.state == statePlaying {
 			g.state = statePaused
 			g.playPause()
@@ -625,27 +651,27 @@ func (g *Game) handleInput() {
 			g.playPause()
 		}
 	}
-	if g.state == stateLevelComplete && g.justPressed(ebiten.KeySpace) {
+	if g.state == stateLevelComplete && confirmPressed {
 		g.continueAfterLevelComplete()
 	}
-	if g.state == stateLifeLost && g.justPressed(ebiten.KeySpace) {
+	if g.state == stateLifeLost && confirmPressed {
 		g.continueAfterLifeLost()
 	}
-	if g.state == stateGameOver && g.justPressed(ebiten.KeyR) {
+	if g.state == stateGameOver && (g.justPressed(ebiten.KeyR) || confirmPressed) {
 		g.returnToMenu()
 	}
-	if g.state == stateVictory && g.justPressed(ebiten.KeyR) {
+	if g.state == stateVictory && (g.justPressed(ebiten.KeyR) || confirmPressed) {
 		g.restart()
 	}
-	if g.state == stateVictory && g.justPressed(ebiten.KeyEscape) {
+	if g.state == stateVictory && cancelPressed {
 		g.returnToMenu()
 	}
-	if g.justPressed(ebiten.KeyQ) {
+	if menuBackPressed {
 		g.returnToMenu()
 	}
 }
 
-func (g *Game) handleNameEntry() {
+func (g *Game) handleNameEntry(confirmPressed, cancelPressed bool) {
 	for _, r := range ebiten.AppendInputChars(nil) {
 		if len(g.nameInput) >= 12 {
 			continue
@@ -657,11 +683,11 @@ func (g *Game) handleNameEntry() {
 	if g.justPressed(ebiten.KeyBackspace) && len(g.nameInput) > 0 {
 		g.nameInput = g.nameInput[:len(g.nameInput)-1]
 	}
-	if g.justPressed(ebiten.KeyEnter) {
+	if g.justPressed(ebiten.KeyEnter) || confirmPressed {
 		g.saveCurrentHighScore()
 		g.state = stateHighScores
 	}
-	if g.justPressed(ebiten.KeyEscape) {
+	if g.justPressed(ebiten.KeyEscape) || cancelPressed {
 		g.nameInput = ""
 		g.state = stateGameOver
 	}
@@ -711,6 +737,85 @@ func (g *Game) rememberKeys() {
 	} {
 		g.keys[key] = ebiten.IsKeyPressed(key)
 	}
+}
+
+type controllerInput struct {
+	Up      bool
+	Right   bool
+	Down    bool
+	Left    bool
+	Confirm bool
+	Cancel  bool
+	Pause   bool
+	Mute    bool
+}
+
+func (g *Game) readGamepadInput() controllerInput {
+	g.gamepadIDs = ebiten.AppendGamepadIDs(g.gamepadIDs[:0])
+	id, ok := firstStandardGamepad(g.gamepadIDs)
+	g.controller = ok
+	if !ok {
+		g.stickHeld = false
+		return controllerInput{}
+	}
+
+	input := controllerInput{
+		Up:      inpututil.IsStandardGamepadButtonJustPressed(id, ebiten.StandardGamepadButtonLeftTop),
+		Right:   inpututil.IsStandardGamepadButtonJustPressed(id, ebiten.StandardGamepadButtonLeftRight),
+		Down:    inpututil.IsStandardGamepadButtonJustPressed(id, ebiten.StandardGamepadButtonLeftBottom),
+		Left:    inpututil.IsStandardGamepadButtonJustPressed(id, ebiten.StandardGamepadButtonLeftLeft),
+		Confirm: inpututil.IsStandardGamepadButtonJustPressed(id, ebiten.StandardGamepadButtonRightBottom),
+		Cancel:  inpututil.IsStandardGamepadButtonJustPressed(id, ebiten.StandardGamepadButtonRightRight),
+		Pause:   inpututil.IsStandardGamepadButtonJustPressed(id, ebiten.StandardGamepadButtonCenterRight),
+		Mute:    inpututil.IsStandardGamepadButtonJustPressed(id, ebiten.StandardGamepadButtonCenterLeft),
+	}
+
+	x := ebiten.StandardGamepadAxisValue(id, ebiten.StandardGamepadAxisLeftStickHorizontal)
+	y := ebiten.StandardGamepadAxisValue(id, ebiten.StandardGamepadAxisLeftStickVertical)
+	if dir, active := analogDirection(x, y, stickDeadzone); active {
+		if !g.stickHeld || dir != g.stickDir {
+			switch dir {
+			case up:
+				input.Up = true
+			case right:
+				input.Right = true
+			case down:
+				input.Down = true
+			case left:
+				input.Left = true
+			}
+		}
+		g.stickDir = dir
+		g.stickHeld = true
+	} else {
+		g.stickHeld = false
+	}
+	return input
+}
+
+func firstStandardGamepad(ids []ebiten.GamepadID) (ebiten.GamepadID, bool) {
+	for _, id := range ids {
+		if ebiten.IsStandardGamepadLayoutAvailable(id) {
+			return id, true
+		}
+	}
+	return 0, false
+}
+
+func analogDirection(x, y, deadzone float64) (direction, bool) {
+	if math.Abs(x) < deadzone && math.Abs(y) < deadzone {
+		return direction{}, false
+	}
+	if math.Abs(x) > math.Abs(y) {
+		if x > 0 {
+			return right, true
+		}
+		return left, true
+	}
+	if y > 0 {
+		return down, true
+	}
+	return up, true
 }
 
 func (g *Game) moveFrames() int {
@@ -862,6 +967,27 @@ func (g *Game) playGameOver() {
 func (g *Game) playPause() {
 	if !g.muted && g.audio != nil {
 		g.audio.Pause()
+	}
+}
+
+func (g *Game) updateMusic() {
+	if g.audio == nil {
+		return
+	}
+	g.audio.UpdateMusic(g.musicTrack(), g.muted, g.state == statePaused)
+}
+
+func (g *Game) musicTrack() musicTrack {
+	switch g.state {
+	case stateMenu, stateHighScores, stateNameEntry:
+		return musicMenu
+	case statePlaying, statePaused:
+		if g.level >= 15 || g.speedMultiplier() >= 15 {
+			return musicLate
+		}
+		return musicEarly
+	default:
+		return musicNone
 	}
 }
 
@@ -1101,6 +1227,9 @@ func (g *Game) drawHUD(screen *ebiten.Image) {
 		mute = "Muted"
 	}
 	ebitenutil.DebugPrintAt(screen, mute+"  P/Esc pause  M mute", 12, 24)
+	if g.controller {
+		ebitenutil.DebugPrintAt(screen, "Controller detected", 585, 24)
+	}
 }
 
 func (g *Game) drawMenu(screen *ebiten.Image) {
@@ -1220,8 +1349,19 @@ func (g *Game) Layout(outsideWidth, outsideHeight int) (int, int) {
 }
 
 type Audio struct {
-	context *audio.Context
+	context      *audio.Context
+	musicPlayer  *audio.Player
+	currentMusic musicTrack
 }
+
+type musicTrack int
+
+const (
+	musicNone musicTrack = iota
+	musicMenu
+	musicEarly
+	musicLate
+)
 
 var (
 	audioContext     *audio.Context
@@ -1248,14 +1388,62 @@ func (a *Audio) Pause() {
 	a.playTone(420, 45, 0.14)
 }
 
+func (a *Audio) UpdateMusic(track musicTrack, muted bool, paused bool) {
+	if a == nil {
+		return
+	}
+	if muted || track == musicNone {
+		a.stopMusic()
+		return
+	}
+	if a.currentMusic != track || a.musicPlayer == nil {
+		a.startMusic(track)
+	}
+	if a.musicPlayer == nil {
+		return
+	}
+	volume := 0.08
+	if paused {
+		volume = 0.025
+	}
+	a.musicPlayer.SetVolume(volume)
+	if !a.musicPlayer.IsPlaying() {
+		a.musicPlayer.Play()
+	}
+}
+
+func (a *Audio) startMusic(track musicTrack) {
+	a.stopMusic()
+	context := sharedAudioContext()
+	pcm := synthMusic(track)
+	if len(pcm) == 0 {
+		return
+	}
+	player, err := context.NewPlayer(audio.NewInfiniteLoop(bytes.NewReader(pcm), int64(len(pcm))))
+	if err != nil {
+		return
+	}
+	player.SetVolume(0.08)
+	player.Play()
+	a.context = context
+	a.musicPlayer = player
+	a.currentMusic = track
+}
+
+func (a *Audio) stopMusic() {
+	if a.musicPlayer != nil {
+		a.musicPlayer.Pause()
+		a.musicPlayer.Close()
+	}
+	a.musicPlayer = nil
+	a.currentMusic = musicNone
+}
+
 func (a *Audio) playTone(freq float64, ms int, volume float64) {
 	if a == nil {
 		return
 	}
-	audioContextOnce.Do(func() {
-		audioContext = audio.NewContext(sampleRate)
-	})
-	a.context = audioContext
+	a.context = sharedAudioContext()
 	stream, err := wav.DecodeWithSampleRate(sampleRate, bytes.NewReader(synthWAV(freq, ms, volume)))
 	if err != nil {
 		return
@@ -1265,6 +1453,50 @@ func (a *Audio) playTone(freq float64, ms int, volume float64) {
 		return
 	}
 	player.Play()
+}
+
+func sharedAudioContext() *audio.Context {
+	audioContextOnce.Do(func() {
+		audioContext = audio.NewContext(sampleRate)
+	})
+	return audioContext
+}
+
+func synthMusic(track musicTrack) []byte {
+	switch track {
+	case musicMenu:
+		return synthPattern([]int{262, 330, 392, 330, 294, 349, 440, 349}, 140, 0.05)
+	case musicEarly:
+		return synthPattern([]int{330, 392, 494, 392, 349, 440, 523, 440}, 115, 0.045)
+	case musicLate:
+		return synthPattern([]int{440, 554, 659, 554, 494, 622, 740, 622}, 90, 0.04)
+	default:
+		return nil
+	}
+}
+
+func synthPattern(notes []int, noteMS int, volume float64) []byte {
+	samplesPerNote := sampleRate * noteMS / 1000
+	pcm := make([]int16, 0, samplesPerNote*len(notes))
+	for _, note := range notes {
+		for i := 0; i < samplesPerNote; i++ {
+			t := float64(i) / sampleRate
+			wave := 1.0
+			if math.Sin(2*math.Pi*float64(note)*t) < 0 {
+				wave = -1.0
+			}
+			bass := 0.5
+			if math.Sin(2*math.Pi*float64(note/2)*t) < 0 {
+				bass = -0.5
+			}
+			pcm = append(pcm, int16((wave+bass)*volume*math.MaxInt16))
+		}
+	}
+	buf := &bytes.Buffer{}
+	for _, sample := range pcm {
+		_ = binary.Write(buf, binary.LittleEndian, sample)
+	}
+	return buf.Bytes()
 }
 
 func synthWAV(freq float64, ms int, volume float64) []byte {
