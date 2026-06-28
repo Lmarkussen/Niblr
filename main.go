@@ -176,11 +176,15 @@ func (g *Game) rememberKeys() {
 }
 
 func (g *Game) moveFrames() int {
-	frames := startMoveFrames - (g.level - 1)
+	frames := startMoveFrames - (g.speedMultiplier() - 1)
 	if frames < minMoveFrames {
 		return minMoveFrames
 	}
 	return frames
+}
+
+func (g *Game) speedMultiplier() int {
+	return g.levelApples + 1
 }
 
 func (g *Game) step() {
@@ -320,7 +324,8 @@ func (g *Game) drawHUD(screen *ebiten.Image) {
 	ebitenutil.DebugPrintAt(screen, "Score: "+strconv.Itoa(g.score), 110, 10)
 	ebitenutil.DebugPrintAt(screen, "Level: "+strconv.Itoa(g.level), 245, 10)
 	ebitenutil.DebugPrintAt(screen, "Apples: "+strconv.Itoa(g.levelApples)+"/"+strconv.Itoa(applesPerLevel), 365, 10)
-	ebitenutil.DebugPrintAt(screen, "P/Esc: pause", 560, 10)
+	ebitenutil.DebugPrintAt(screen, "Speed: "+strconv.Itoa(g.speedMultiplier())+"x", 540, 10)
+	ebitenutil.DebugPrintAt(screen, "P/Esc: pause", 660, 10)
 }
 
 func drawCell(screen *ebiten.Image, p point, c color.Color) {

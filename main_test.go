@@ -68,3 +68,22 @@ func TestCollisionLogic(t *testing.T) {
 		t.Fatal("moving into the current tail should collide when growing")
 	}
 }
+
+func TestSpeedIncreasesWithApplesAndResetsOnLevelClear(t *testing.T) {
+	g := NewGame()
+
+	if g.speedMultiplier() != 1 {
+		t.Fatalf("expected starting speed 1x, got %dx", g.speedMultiplier())
+	}
+
+	g.levelApples = 3
+	if g.speedMultiplier() != 4 {
+		t.Fatalf("expected speed to increase with apples, got %dx", g.speedMultiplier())
+	}
+
+	g.level = 2
+	g.startLevel()
+	if g.speedMultiplier() != 1 {
+		t.Fatalf("expected speed to reset after level start, got %dx", g.speedMultiplier())
+	}
+}
