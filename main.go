@@ -23,6 +23,7 @@ const (
 	startLives      = 4
 	startMoveFrames = 16
 	minMoveFrames   = 6
+	appleSpeedStep  = 2
 )
 
 type point struct {
@@ -252,7 +253,7 @@ func (g *Game) rememberKeys() {
 }
 
 func (g *Game) moveFrames() int {
-	frames := startMoveFrames - (g.level-1)/2 - g.levelApples
+	frames := startMoveFrames - (g.level-1)/2 - g.levelApples*appleSpeedStep
 	if frames < minMoveFrames {
 		return minMoveFrames
 	}
@@ -260,7 +261,7 @@ func (g *Game) moveFrames() int {
 }
 
 func (g *Game) speedMultiplier() int {
-	return g.levelApples + 1
+	return g.levelApples*appleSpeedStep + 1
 }
 
 func (g *Game) step() {

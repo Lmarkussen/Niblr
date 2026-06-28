@@ -159,8 +159,11 @@ func TestSpeedIncreasesWithApplesAndResetsOnLevelClear(t *testing.T) {
 	}
 
 	g.levelApples = 3
-	if g.speedMultiplier() != 4 {
+	if g.speedMultiplier() != 7 {
 		t.Fatalf("expected speed to increase with apples, got %dx", g.speedMultiplier())
+	}
+	if g.moveFrames() != startMoveFrames-3*appleSpeedStep {
+		t.Fatalf("expected move frames to drop by %d per apple, got %d", appleSpeedStep, g.moveFrames())
 	}
 
 	g.level = 2
