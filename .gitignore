@@ -1,0 +1,14 @@
+# Go build outputs
+bin/
+dist/
+*.exe
+*.out
+*.test
+
+# Local editor and OS files
+.DS_Store
+.idea/
+.vscode/
+
+# Runtime/local state
+*.log
