@@ -420,6 +420,38 @@ func TestAnalogDirectionUsesDeadzoneAndDominantAxis(t *testing.T) {
 	}
 }
 
+func TestGeneratedMusicIsStereoPCM(t *testing.T) {
+	pcm := synthMusic(musicMenu)
+	if len(pcm) == 0 {
+		t.Fatal("expected generated menu music")
+	}
+	if len(pcm)%4 != 0 {
+		t.Fatalf("expected 16-bit stereo PCM byte length to be divisible by 4, got %d", len(pcm))
+	}
+}
+
+func TestMusicTrackSelection(t *testing.T) {
+	g := newStartedTestGame()
+	g.state = stateMenu
+	if g.musicTrack() != musicMenu {
+		t.Fatal("expected menu music on menu")
+	}
+	g.state = statePlaying
+	g.level = 1
+	g.levelApples = 0
+	if g.musicTrack() != musicEarly {
+		t.Fatal("expected early music on early level")
+	}
+	g.level = 20
+	if g.musicTrack() != musicLate {
+		t.Fatal("expected late music on late level")
+	}
+	g.state = stateGameOver
+	if g.musicTrack() != musicNone {
+		t.Fatal("expected music to stop on game over")
+	}
+}
+
 func TestReturnToMenuClearsRunButKeepsDifficultySelection(t *testing.T) {
 	g := newStartedTestGame()
 	g.difficulty = 2

@@ -1351,6 +1351,7 @@ func (g *Game) Layout(outsideWidth, outsideHeight int) (int, int) {
 type Audio struct {
 	context      *audio.Context
 	musicPlayer  *audio.Player
+	effects      []*audio.Player
 	currentMusic musicTrack
 }
 
@@ -1392,6 +1393,7 @@ func (a *Audio) UpdateMusic(track musicTrack, muted bool, paused bool) {
 	if a == nil {
 		return
 	}
+	a.cleanupEffects()
 	if muted || track == musicNone {
 		a.stopMusic()
 		return
@@ -1415,6 +1417,9 @@ func (a *Audio) UpdateMusic(track musicTrack, muted bool, paused bool) {
 func (a *Audio) startMusic(track musicTrack) {
 	a.stopMusic()
 	context := sharedAudioContext()
+	if !context.IsReady() {
+		return
+	}
 	pcm := synthMusic(track)
 	if len(pcm) == 0 {
 		return
@@ -1444,6 +1449,9 @@ func (a *Audio) playTone(freq float64, ms int, volume float64) {
 		return
 	}
 	a.context = sharedAudioContext()
+	if !a.context.IsReady() {
+		return
+	}
 	stream, err := wav.DecodeWithSampleRate(sampleRate, bytes.NewReader(synthWAV(freq, ms, volume)))
 	if err != nil {
 		return
@@ -1453,6 +1461,19 @@ func (a *Audio) playTone(freq float64, ms int, volume float64) {
 		return
 	}
 	player.Play()
+	a.effects = append(a.effects, player)
+}
+
+func (a *Audio) cleanupEffects() {
+	active := a.effects[:0]
+	for _, player := range a.effects {
+		if player.IsPlaying() {
+			active = append(active, player)
+			continue
+		}
+		_ = player.Close()
+	}
+	a.effects = active
 }
 
 func sharedAudioContext() *audio.Context {
@@ -1489,7 +1510,8 @@ func synthPattern(notes []int, noteMS int, volume float64) []byte {
 			if math.Sin(2*math.Pi*float64(note/2)*t) < 0 {
 				bass = -0.5
 			}
-			pcm = append(pcm, int16((wave+bass)*volume*math.MaxInt16))
+			sample := int16((wave + bass) * volume * math.MaxInt16)
+			pcm = append(pcm, sample, sample)
 		}
 	}
 	buf := &bytes.Buffer{}
