@@ -41,6 +41,6 @@ make test
 
 ## Gameplay
 
-Eat apples to increase your score and grow the snake. Each level is cleared after 15 apples. Later levels increase the snake speed and add simple static obstacles.
+Eat apples to increase your score, grow the snake, and raise the current speed. Each level is cleared after 15 apples. Speed resets at the start of each level, and later levels add simple static obstacles.
 
-Avoid walls, obstacles, and your own body.
+You start with 4 lives. Avoid walls, obstacles, and your own body. Losing all lives ends the game.

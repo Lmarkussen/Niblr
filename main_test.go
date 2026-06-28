@@ -87,3 +87,41 @@ func TestSpeedIncreasesWithApplesAndResetsOnLevelClear(t *testing.T) {
 		t.Fatalf("expected speed to reset after level start, got %dx", g.speedMultiplier())
 	}
 }
+
+func TestLoseLifeKeepsCurrentLevelUntilLivesDepleted(t *testing.T) {
+	g := NewGame()
+	g.level = 2
+	g.levelApples = 5
+	g.score = 500
+	g.lives = startLives
+	g.obstacles = buildObstacles(g.level)
+	g.spawnApple()
+
+	g.loseLife()
+	if g.state == stateGameOver {
+		t.Fatal("did not expect game over while lives remain")
+	}
+	if g.lives != startLives-1 {
+		t.Fatalf("expected one life lost, got %d lives", g.lives)
+	}
+	if g.level != 2 {
+		t.Fatalf("expected to remain on level 2, got level %d", g.level)
+	}
+	if g.levelApples != 5 {
+		t.Fatalf("expected apple progress to remain 5, got %d", g.levelApples)
+	}
+	if g.score != 500 {
+		t.Fatalf("expected score to remain 500, got %d", g.score)
+	}
+
+	g.loseLife()
+	g.loseLife()
+	if g.state == stateGameOver {
+		t.Fatal("did not expect game over before final life is lost")
+	}
+
+	g.loseLife()
+	if g.state != stateGameOver {
+		t.Fatal("expected game over when all lives are depleted")
+	}
+}

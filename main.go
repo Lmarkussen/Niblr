@@ -20,6 +20,7 @@ const (
 	gridWidth       = windowWidth / cellSize
 	gridHeight      = (windowHeight - hudHeight) / cellSize
 	applesPerLevel  = 15
+	startLives      = 4
 	startMoveFrames = 12
 	minMoveFrames   = 5
 )
@@ -57,6 +58,7 @@ type Game struct {
 	state       gameState
 	score       int
 	level       int
+	lives       int
 	levelApples int
 	moveTimer   int
 	keys        map[ebiten.Key]bool
@@ -74,11 +76,20 @@ func NewGame() *Game {
 func (g *Game) restart() {
 	g.score = 0
 	g.level = 1
+	g.lives = startLives
 	g.state = statePlaying
 	g.startLevel()
 }
 
 func (g *Game) startLevel() {
+	g.levelApples = 0
+	g.moveTimer = 0
+	g.obstacles = buildObstacles(g.level)
+	g.resetSnake()
+	g.spawnApple()
+}
+
+func (g *Game) resetSnake() {
 	center := point{x: gridWidth / 2, y: gridHeight / 2}
 	g.snake = []point{
 		center,
@@ -87,10 +98,7 @@ func (g *Game) startLevel() {
 	}
 	g.dir = right
 	g.nextDir = right
-	g.levelApples = 0
 	g.moveTimer = 0
-	g.obstacles = buildObstacles(g.level)
-	g.spawnApple()
 }
 
 func buildObstacles(level int) map[point]bool {
@@ -194,7 +202,7 @@ func (g *Game) step() {
 	grow := g.hasApple && next == g.apple
 
 	if g.hitsWall(next) || g.hitsObstacle(next) || g.hitsSnakeOnMove(next, grow) {
-		g.state = stateGameOver
+		g.loseLife()
 		return
 	}
 
@@ -212,6 +220,19 @@ func (g *Game) step() {
 		return
 	}
 	g.spawnApple()
+}
+
+func (g *Game) loseLife() {
+	g.lives--
+	if g.lives <= 0 {
+		g.state = stateGameOver
+		return
+	}
+
+	g.resetSnake()
+	if !g.hasApple || g.occupied(g.apple) {
+		g.spawnApple()
+	}
 }
 
 func (g *Game) hitsWall(p point) bool {
@@ -325,7 +346,8 @@ func (g *Game) drawHUD(screen *ebiten.Image) {
 	ebitenutil.DebugPrintAt(screen, "Level: "+strconv.Itoa(g.level), 245, 10)
 	ebitenutil.DebugPrintAt(screen, "Apples: "+strconv.Itoa(g.levelApples)+"/"+strconv.Itoa(applesPerLevel), 365, 10)
 	ebitenutil.DebugPrintAt(screen, "Speed: "+strconv.Itoa(g.speedMultiplier())+"x", 540, 10)
-	ebitenutil.DebugPrintAt(screen, "P/Esc: pause", 660, 10)
+	ebitenutil.DebugPrintAt(screen, "Lives: "+strconv.Itoa(g.lives), 630, 10)
+	ebitenutil.DebugPrintAt(screen, "P/Esc", 725, 10)
 }
 
 func drawCell(screen *ebiten.Image, p point, c color.Color) {
