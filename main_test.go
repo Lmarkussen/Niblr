@@ -5,8 +5,15 @@ import (
 	"testing"
 )
 
-func TestSpawnAppleAvoidsSnakeAndObstacles(t *testing.T) {
+func newStartedTestGame() *Game {
 	g := NewGame()
+	g.audio = nil
+	g.restart()
+	return g
+}
+
+func TestSpawnAppleAvoidsSnakeAndObstacles(t *testing.T) {
+	g := newStartedTestGame()
 	g.rng = rand.New(rand.NewSource(1))
 	g.snake = []point{{x: 1, y: 1}, {x: 2, y: 1}, {x: 3, y: 1}}
 	g.obstacles = map[point]bool{
@@ -35,7 +42,7 @@ func TestSpawnAppleAvoidsSnakeAndObstacles(t *testing.T) {
 }
 
 func TestSpawnAppleHandlesFullBoard(t *testing.T) {
-	g := NewGame()
+	g := newStartedTestGame()
 	g.snake = g.snake[:0]
 	g.obstacles = map[point]bool{}
 	for y := 0; y < gridHeight; y++ {
@@ -51,7 +58,7 @@ func TestSpawnAppleHandlesFullBoard(t *testing.T) {
 }
 
 func TestCollisionLogic(t *testing.T) {
-	g := NewGame()
+	g := newStartedTestGame()
 	g.snake = []point{{x: 5, y: 5}, {x: 4, y: 5}, {x: 3, y: 5}}
 	g.obstacles = map[point]bool{{x: 7, y: 5}: true}
 
@@ -73,7 +80,7 @@ func TestCollisionLogic(t *testing.T) {
 }
 
 func TestLevelCompleteWaitsForSpaceBeforeAdvancing(t *testing.T) {
-	g := NewGame()
+	g := newStartedTestGame()
 	for i := 0; i < applesPerLevel; i++ {
 		next := point{x: g.snake[0].x + g.dir.x, y: g.snake[0].y + g.dir.y}
 		g.apple = next
@@ -104,7 +111,7 @@ func TestLevelCompleteWaitsForSpaceBeforeAdvancing(t *testing.T) {
 }
 
 func TestObstacleCollisionLosesLife(t *testing.T) {
-	g := NewGame()
+	g := newStartedTestGame()
 	g.lives = 1
 	g.snake = []point{{x: 5, y: 5}, {x: 4, y: 5}, {x: 3, y: 5}}
 	g.dir = right
@@ -118,7 +125,7 @@ func TestObstacleCollisionLosesLife(t *testing.T) {
 }
 
 func TestSelfCollisionLosesLife(t *testing.T) {
-	g := NewGame()
+	g := newStartedTestGame()
 	g.lives = 1
 	g.snake = []point{
 		{x: 5, y: 5},
@@ -138,7 +145,7 @@ func TestSelfCollisionLosesLife(t *testing.T) {
 }
 
 func TestWallCollisionLosesLife(t *testing.T) {
-	g := NewGame()
+	g := newStartedTestGame()
 	g.lives = 1
 	g.snake = []point{{x: 0, y: 5}, {x: 1, y: 5}, {x: 2, y: 5}}
 	g.dir = left
@@ -152,7 +159,7 @@ func TestWallCollisionLosesLife(t *testing.T) {
 }
 
 func TestSpeedIncreasesWithApplesAndResetsOnLevelClear(t *testing.T) {
-	g := NewGame()
+	g := newStartedTestGame()
 
 	if g.speedMultiplier() != 1 {
 		t.Fatalf("expected starting speed 1x, got %dx", g.speedMultiplier())
@@ -174,7 +181,7 @@ func TestSpeedIncreasesWithApplesAndResetsOnLevelClear(t *testing.T) {
 }
 
 func TestLoseLifeKeepsCurrentLevelUntilLivesDepleted(t *testing.T) {
-	g := NewGame()
+	g := newStartedTestGame()
 	g.level = 2
 	g.levelApples = 5
 	g.score = 500
@@ -192,8 +199,8 @@ func TestLoseLifeKeepsCurrentLevelUntilLivesDepleted(t *testing.T) {
 	if g.level != 2 {
 		t.Fatalf("expected to remain on level 2, got level %d", g.level)
 	}
-	if g.levelApples != 5 {
-		t.Fatalf("expected apple progress to remain 5, got %d", g.levelApples)
+	if g.levelApples != 0 {
+		t.Fatalf("expected apple progress to reset on death, got %d", g.levelApples)
 	}
 	if g.score != 500 {
 		t.Fatalf("expected score to remain 500, got %d", g.score)
@@ -204,6 +211,9 @@ func TestLoseLifeKeepsCurrentLevelUntilLivesDepleted(t *testing.T) {
 	if g.state == stateGameOver {
 		t.Fatal("did not expect game over before final life is lost")
 	}
+	if g.state != stateLifeLost {
+		t.Fatalf("expected life lost state before final life is lost, got %v", g.state)
+	}
 
 	g.loseLife()
 	if g.state != stateGameOver {
@@ -213,7 +223,7 @@ func TestLoseLifeKeepsCurrentLevelUntilLivesDepleted(t *testing.T) {
 
 func TestLevelLayoutsHaveValidAppleSpawnPositions(t *testing.T) {
 	for level := 1; level <= 10; level++ {
-		g := NewGame()
+		g := newStartedTestGame()
 		g.level = level
 		g.startLevel()
 
@@ -228,5 +238,52 @@ func TestLevelLayoutsHaveValidAppleSpawnPositions(t *testing.T) {
 				t.Fatalf("level %d spawned invalid apple at %+v", level, g.apple)
 			}
 		}
+	}
+}
+
+func TestNewGameStartsAtMenuAndDifficultyAffectsSpeed(t *testing.T) {
+	g := NewGame()
+	g.audio = nil
+	if g.state != stateMenu {
+		t.Fatalf("expected new game to start at menu, got %v", g.state)
+	}
+
+	g.difficulty = 0
+	g.restart()
+	normal := g.moveFrames()
+	g.difficulty = 1
+	hard := g.moveFrames()
+	g.difficulty = 2
+	insane := g.moveFrames()
+
+	if hard >= normal {
+		t.Fatalf("expected hard to be faster than normal, normal=%d hard=%d", normal, hard)
+	}
+	if insane >= hard {
+		t.Fatalf("expected insane to be faster than hard, hard=%d insane=%d", hard, insane)
+	}
+}
+
+func TestInputBufferRejectsReversalAndQueuesTurns(t *testing.T) {
+	g := newStartedTestGame()
+
+	g.setDirection(left)
+	if len(g.dirQueue) != 0 {
+		t.Fatal("expected immediate 180-degree reversal to be rejected")
+	}
+
+	g.setDirection(up)
+	g.setDirection(left)
+	if len(g.dirQueue) != 2 {
+		t.Fatalf("expected two buffered turns, got %d", len(g.dirQueue))
+	}
+
+	g.step()
+	if g.dir != up {
+		t.Fatalf("expected first queued direction up, got %+v", g.dir)
+	}
+	g.step()
+	if g.dir != left {
+		t.Fatalf("expected second queued direction left, got %+v", g.dir)
 	}
 }
