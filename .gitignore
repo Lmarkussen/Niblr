@@ -4,6 +4,7 @@ dist/
 *.exe
 *.out
 *.test
+niblr
 
 # Local editor and OS files
 .DS_Store
